@@ -1,184 +1,230 @@
-import { useState, ReactNode, useEffect, useRef } from "react";
-// import { Header } from "./header"; // Header import removed
+import { ReactNode, useEffect, useRef, useState } from "react"; // Keep useState for other states
+// import { Header } from "./header"; // Header import REMOVED
+import { BurgerIcon } from "@/components/ui"; // BurgerIcon import ADDED
 import { Sidebar } from "./sidebar";
 import { MobileNav } from "./mobile-nav";
 import { cn } from "@/lib/utils";
+import { useSettings } from "@/contexts/SettingsContext"; // Import useSettings
+
+// const RMB_SIDEBAR_CONTROL_LS_KEY = 'enableRmbSidebarControl'; // REMOVED - Context handles this key
+const SIDEBAR_PINNED_LS_KEY = 'sidebarPinned'; // Key for persisting adapted state
 
 interface MainLayoutProps {
   children: ReactNode;
   className?: string;
 }
 
-// Helper function to get initial pin state from localStorage
-const getInitialPinState = (): boolean => {
-  // Ensure localStorage is accessed only on the client-side
+// Helper to read from localStorage
+const getInitialLocalStorageBool = (key: string, defaultValue: boolean): boolean => {
   if (typeof window !== 'undefined') {
-    const storedPinState = localStorage.getItem('sidebarPinned');
-    return storedPinState ? JSON.parse(storedPinState) : false;
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : defaultValue;
   }
-  return false;
+  return defaultValue;
 };
 
 export function MainLayout({ children, className }: MainLayoutProps) {
-  const initialPinnedState = getInitialPinState();
-  const [isSidebarPinned, setIsSidebarPinned] = useState<boolean>(initialPinnedState);
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(initialPinnedState); // Sidebar is open if it was pinned
+  const { isRmbControlEnabled } = useSettings(); // Get RMB state from context
+
+  // Initialize isSidebarPinned (content adaptation state)
+  const initialIsPinnedFromStorage = getInitialLocalStorageBool(SIDEBAR_PINNED_LS_KEY, false);
+  const [isSidebarPinned, setIsSidebarPinned] = useState<boolean>(initialIsPinnedFromStorage);
+
+  // Initialize sidebarOpen state
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(initialIsPinnedFromStorage); 
+  
   const [sidebarPosition, setSidebarPosition] = useState<{ x: number, y: number } | null>(null);
   const [isAnimatingPin, setIsAnimatingPin] = useState<boolean>(false);
-  const [isMobile, setIsMobile] = useState(false); // isMobile state remains
   const sidebarRef = useRef<HTMLElement | null>(null);
+  const prevRmbEnabledRef = useRef(isRmbControlEnabled); // Will now track context value
 
-  // Effect to save pin state to localStorage
+  // Removed burgerWrapperStyle and burgerWrapperClasses
+
+  // useEffect for persisting isSidebarPinned state (adapted state)
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('sidebarPinned', JSON.stringify(isSidebarPinned));
+      localStorage.setItem(SIDEBAR_PINNED_LS_KEY, JSON.stringify(isSidebarPinned && sidebarOpen));
     }
-  }, [isSidebarPinned]);
+  }, [isSidebarPinned, sidebarOpen]);
+
+  // Removed useEffect for 'storage' event listening for RMB_SIDEBAR_CONTROL_LS_KEY
+  // Context provider handles localStorage updates and reactivity for isRmbControlEnabled.
+
+  // useEffect for when isRmbControlEnabled (from context) changes
+  useEffect(() => {
+    // If isRmbControlEnabled has changed from false to true (i.e., was just toggled ON)
+    if (isRmbControlEnabled && !prevRmbEnabledRef.current) {
+      setSidebarOpen(true);
+      setIsSidebarPinned(true);
+      setSidebarPosition(null); 
+    }
+    // If isRmbControlEnabled has changed from true to false (i.e., was just toggled OFF)
+    else if (!isRmbControlEnabled && prevRmbEnabledRef.current) {
+      setSidebarOpen(false);
+      setIsSidebarPinned(false);
+    }
+    prevRmbEnabledRef.current = isRmbControlEnabled;
+  }, [isRmbControlEnabled]); // Dependencies: isRmbControlEnabled (from context)
 
   const toggleSidebar = () => {
-    if (isSidebarPinned && sidebarOpen) {
-      return;
+    // If opening: Call setSidebarOpen(true) AND setIsSidebarPinned(true).
+    // If closing: Call setSidebarOpen(false) AND setIsSidebarPinned(false).
+    if (!sidebarOpen) {
+      setSidebarOpen(true);
+      setIsSidebarPinned(true); // Content adapts, sidebar uses default pinned position
+      setSidebarPosition(null); // Ensure it uses default pinned position
+    } else {
+      setSidebarOpen(false);
+      setIsSidebarPinned(false); // Content un-adapts
     }
-    const newOpenState = !sidebarOpen;
-    setSidebarOpen(newOpenState);
-    if (!newOpenState) { // If sidebar is being closed
-      setSidebarPosition(null);
-    }
-    // If opening, position is set by handleContextMenu or when pinned
   };
 
   const toggleSidebarPin = () => {
-    setIsAnimatingPin(true); // Start animation state
-
+    // This function is called when the pin button *inside* the sidebar is clicked.
+    // It should toggle the isSidebarPinned state.
     const newPinState = !isSidebarPinned;
     setIsSidebarPinned(newPinState);
-    setSidebarPosition(null); // Important: for pinned state, position is null to use default styles
+    setIsAnimatingPin(true); // Start animation state
 
-    if (newPinState) {
-      setSidebarOpen(true);
+    if (newPinState) { // Pinning
+      setSidebarOpen(true); // Ensure it's open
+      setSidebarPosition(null); // Use default pinned position
+    } else { // Unpinning
+      setSidebarOpen(true); // Sidebar remains open but now follows unpinned/floating logic
+      // Position might be set by RMB click later, or it defaults if not.
+      // If it was previously RMB opened at a position, that position is lost here, which is acceptable.
+      // User can re-open with RMB if they want specific floating position.
     }
-    // If unpinning a closed sidebar, it remains closed.
-    // If unpinning an open sidebar, it remains open (at default 1rem,1rem until next dynamic placement).
-
+    
     setTimeout(() => {
       setIsAnimatingPin(false); // End animation state after duration
     }, 300); // Match this duration with Sidebar's transition duration
   };
   
   const handleRequestClose = () => {
-    if (!isSidebarPinned) {
-      setSidebarOpen(false);
-      // setSidebarPosition(null); // REMOVED as per instruction
-    }
+    // Called by Sidebar's internal close burger.
+    // Should set setSidebarOpen(false) AND setIsSidebarPinned(false).
+    setSidebarOpen(false);
+    setIsSidebarPinned(false);
   };
 
   useEffect(() => {
     const handleContextMenu = (event: MouseEvent) => {
-      event.preventDefault();
-      console.log('[MainLayout] handleContextMenu: contextmenu event triggered. Button:', (event as MouseEvent).button);
-      if ((event as MouseEvent).button !== 2) {
-        console.log('[MainLayout] handleContextMenu: Ignored due to not being a right-click (button:', (event as MouseEvent).button, ')');
-        return;
+      if (!isRmbControlEnabled) {
+        return; // RMB control not active, do nothing, allow default menu
       }
-      if (isSidebarPinned) { // If pinned, right-click does nothing to position/state
+
+      if ((event as MouseEvent).button !== 2) { // Not a right-click
+        return; // Do nothing, allow default menu for other mouse buttons if any
+      }
+
+      // From this point, RMB control is ON, and it IS a right-click
+      
+      if (isSidebarPinned && sidebarOpen) {
+        // Sidebar is already open and pinned. Do nothing with sidebar. Prevent default menu.
+        event.preventDefault();
         return;
       }
 
-      if (sidebarOpen) {
-        // If sidebar is open, a right click outside of it closes it.
+      // RMB control is ON, it's a right-click, and sidebar is NOT (open + pinned).
+      // This means sidebar is either closed, or open but floating.
+      event.preventDefault(); // Now we are definitely handling it.
+
+      if (sidebarOpen) { // Sidebar is open and floating
+        // If click is outside the floating sidebar, close it.
         if (sidebarRef.current && !sidebarRef.current.contains(event.target as Node)) {
-          console.log('[MainLayout] handleContextMenu: Right-click outside. Closing sidebar.');
           setSidebarOpen(false);
-          // setSidebarPosition(null); // REMOVED as per instruction
+          setIsSidebarPinned(false); // Should already be false, but good to be sure
         }
-        // If right-click is inside an already open sidebar, do nothing.
-      } else {
-        // If sidebar is closed, open it at click position.
-        console.log('[MainLayout] handleContextMenu: Right-click. Opening sidebar at', { x: event.clientX, y: event.clientY });
+        // If click is inside the floating sidebar, do nothing.
+      } else { // Sidebar is closed
+        // Open sidebar floating at click position
         setSidebarOpen(true);
+        setIsSidebarPinned(false); // Ensure it opens as floating
         setSidebarPosition({ x: event.clientX, y: event.clientY });
       }
     };
 
     document.addEventListener('contextmenu', handleContextMenu);
-
     return () => {
       document.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [isSidebarPinned, toggleSidebar, sidebarOpen]); // Keep toggleSidebar if it's stable or memoized
+  }, [isRmbControlEnabled, sidebarOpen, isSidebarPinned, sidebarRef, setSidebarOpen, setIsSidebarPinned, setSidebarPosition]); // Updated dependencies
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      console.log('[MainLayout] handleClickOutside: mousedown event triggered. Button:', (event as MouseEvent).button);
-      if ((event as MouseEvent).button !== 0) { // 0 is the main button, usually left
-        console.log('[MainLayout] handleClickOutside: Ignored due to not being a left-click (button:', (event as MouseEvent).button, ')');
+      if ((event as MouseEvent).button !== 0) { 
         return;
       }
-      // Check if the sidebar is open, not pinned, and the click is outside the sidebar
       if (
         sidebarOpen &&
-        !isSidebarPinned &&
+        !isSidebarPinned && // Only close if it's floating (not content-adapted)
         sidebarRef.current &&
         !sidebarRef.current.contains(event.target as Node)
       ) {
-        // Check if the event target is not the context menu trigger itself (if that's relevant)
-        // For now, any click outside when unpinned & open will close it.
-        console.log('[MainLayout] handleClickOutside: Conditions met (sidebarOpen, !isSidebarPinned, click outside). Closing sidebar.');
         setSidebarOpen(false);
-        // Do NOT set sidebarPosition to null here, to allow fade-out at current position.
+        setIsSidebarPinned(false); // Ensure content un-adapts
       }
     };
 
-    // Add event listener for mousedown. Using mousedown as it fires before click 
+    // Add event listener for mousedown.
     // and can prevent other actions if needed, though click should also work.
     document.addEventListener('mousedown', handleClickOutside);
-
-    // Cleanup function to remove the event listener
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [sidebarOpen, isSidebarPinned, sidebarRef, setSidebarOpen]); // Dependencies
+  }, [sidebarOpen, isSidebarPinned, sidebarRef]); // Minimal dependencies
   
   return (
-    <div className="w-full h-screen"> {/* relative removed, overflow-hidden removed, bg-gray-50 removed, Ensure positioning context */}
-      {/* Sidebar remains a direct child, already styled as a floating island */}
+    <div className="w-full h-screen"> 
+      {/* Main BurgerIcon wrapper - always rendered, visibility controlled by opacity/scale */}
+      <div
+        className={cn(
+          "fixed z-50 top-2 left-2", // Base position
+          "transition-all duration-300 ease-in-out", // Transitions for opacity and transform (scale)
+          (!isRmbControlEnabled && !sidebarOpen) // Condition for visibility
+            ? "opacity-100 scale-100 pointer-events-auto"
+            : "opacity-0 scale-90 pointer-events-none" // Hidden state with slight scale down
+        )}
+      >
+        <BurgerIcon
+            isOpen={false} // Always a burger, as it's the opener
+            onClick={toggleSidebar}
+            className="text-slate-600 p-1 h-7 w-7 hover:bg-black/10 rounded-full backdrop-blur-sm focus-visible:ring-2 focus-visible:ring-slate-500/70 flex items-center justify-center"
+          />
+        </div>
+      )}
       <Sidebar 
         isOpen={sidebarOpen} 
         ref={sidebarRef} 
-        isSidebarPinned={isSidebarPinned}
-        toggleSidebarPin={toggleSidebarPin}
-        requestClose={handleRequestClose}
-        setSidebarOpen={setSidebarOpen} // Added setSidebarOpen prop
-        position={sidebarPosition} // MODIFIED: Changed prop name to 'position'
-        isAnimatingPin={isAnimatingPin} // ADD this prop
+        isSidebarPinned={isSidebarPinned} // This now means "content is adapted"
+        toggleSidebarPin={toggleSidebarPin} // For the pin button inside Sidebar
+        requestClose={handleRequestClose} // For the close button inside Sidebar
+        setSidebarOpen={setSidebarOpen} 
+        position={sidebarPosition} 
+        isAnimatingPin={isAnimatingPin} 
       />
       
-      {/* New Main Content Island */}
-      <div // Main content island - Reverted to padding-left
+      <div 
         className={cn(
-          "h-full flex flex-col overflow-y-auto", // Full height, layout
-          "pr-4 pb-4", // Right and bottom padding remain
-          "transition-all duration-300 ease-in-out", // Re-added transition classes
-          isSidebarPinned && sidebarOpen ? "md:pl-[288px] pl-6" : "md:pl-20 pl-6" // Dynamic left padding classes
+          "h-full flex flex-col overflow-y-auto", 
+          "pr-4 pb-4", 
+          "transition-all duration-300 ease-in-out", 
+          // Content adaptation logic: if isSidebarPinned is true (and sidebarOpen must be true for this state), apply padding.
+          isSidebarPinned ? "md:pl-[288px] pl-6" : "md:pl-20 pl-6" 
         )}
-        // Removed inline style attribute
       >
-        {/* Header component removed */}
-        
-        {/* Main scrollable area within the island */}
         <main 
           className={cn(
-            "flex-1 isolate", // flex-1 to grow, p-4 removed, isolate for stacking context
-            className // Restore className prop from page
+            "flex-1 isolate", 
+            className 
           )}
         >
-          <div className="h-full"> {/* Restore original children structure */}
+          <div className="h-full"> 
             {children}
           </div>
         </main>
       </div>
-      
-      {/* Mobile Navigation - position may need review in full app context */}
       <MobileNav />
     </div>
   );

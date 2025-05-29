@@ -20,16 +20,21 @@ import {
   UsersIcon,
   ClipboardListIcon,
   PinIcon,
-  PinOffIcon,
-  XIcon
+  PinOffIcon
+  // XIcon removed
 } from "lucide-react";
+import { BurgerIcon } from "@/components/ui"; // Import BurgerIcon
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { UserRoleEnum } from "@shared/schema";
 // import { RoleSwitcher } from "@/components/role-switcher"; // REMOVED
 import { TeacherClassesMenu } from "./teacher-classes-menu";
 import { SchoolAdminScheduleMenu } from "./school-admin-schedule-menu";
-import { ReactNode, forwardRef } from "react";
+// useState, useEffect might be partially unneeded, will adjust if they become fully unused
+import { ReactNode, forwardRef, useState, useEffect } from "react"; 
+import { useSettings } from "@/contexts/SettingsContext"; // Import useSettings
+
+// const RMB_SIDEBAR_CONTROL_LS_KEY = 'enableRmbSidebarControl'; // REMOVED
 
 interface LinkMenuItem {
   id: string;
@@ -59,6 +64,9 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
   ({ isOpen, isSidebarPinned, toggleSidebarPin, requestClose, setSidebarOpen, position, isAnimatingPin }, ref) => {
   const [location] = useLocation();
   const { user } = useAuth();
+  const { isRmbControlEnabled } = useSettings(); // Get RMB state from context
+
+  // Removed local state and effect for isRmbControlEnabled
 
   const handleNavLinkClick = () => {
     if (!isSidebarPinned && isOpen) {
@@ -125,7 +133,7 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
   const sidebarNominalWidth = 256; // w-64
   const screenEdgePadding = 16; // 1rem, for keeping sidebar off the very edge
 
-  console.log('[Sidebar] Rendering. isOpen:', isOpen, 'isSidebarPinned:', isSidebarPinned, 'position:', position, 'isAnimatingPin:', isAnimatingPin);
+  // console.log('[Sidebar] Rendering. isOpen:', isOpen, 'isSidebarPinned:', isSidebarPinned, 'position:', position, 'isAnimatingPin:', isAnimatingPin);
 
   if (position && !isSidebarPinned) { // Condition changed: isOpen removed from here
     let top = position.y;
@@ -146,12 +154,12 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
     // Ensure it's not off the top or left edge
     sidebarStyle.top = Math.max(screenEdgePadding, top) + 'px';
     sidebarStyle.left = Math.max(screenEdgePadding, left) + 'px';
-    console.log('[Sidebar] Style: DYNAMIC/UNPINNED. top:', sidebarStyle.top, 'left:', sidebarStyle.left, 'isOpen:', isOpen);
+    // console.log('[Sidebar] Style: DYNAMIC/UNPINNED. top:', sidebarStyle.top, 'left:', sidebarStyle.left, 'isOpen:', isOpen);
   } else {
     // Default position for pinned state or when not dynamically positioned
     sidebarStyle.top = '1rem';
     sidebarStyle.left = '1rem';
-    console.log('[Sidebar] Style: DEFAULT/PINNED. top: 1rem, left: 1rem, isOpen:', isOpen);
+    // console.log('[Sidebar] Style: DEFAULT/PINNED. top: 1rem, left: 1rem, isOpen:', isOpen);
   }
 
   return (
@@ -167,27 +175,30 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
       style={sidebarStyle} // ADDED style attribute
     >
       {/* Sidebar Header: Pin and Close buttons */}
-      <div className="flex items-center justify-between p-3"> {/* Removed border-b border-slate-700/50 */}
-        <button
-          onClick={toggleSidebarPin}
-          className="p-1 text-gray-700 hover:text-gray-900 hover:bg-black/5 rounded-md transition-colors" // MODIFIED: p-1.5 to p-1
-          aria-label={isSidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
-        >
-          {isSidebarPinned ? (
-            <PinOffIcon className="h-4 w-4" />
-          ) : (
-            <PinIcon className="h-4 w-4" />
-          )}
-        </button>
-        <button
-          onClick={requestClose}
-          className="p-1 text-gray-700 hover:text-gray-900 hover:bg-black/5 rounded-md transition-colors" // MODIFIED: p-1.5 to p-1
-          aria-label="Close sidebar"
-        >
-          <XIcon className="h-4 w-4" />
-        </button>
+      <div className={cn(
+        "flex items-center p-3", // Common styling, p-3 is for padding within the header
+        isRmbControlEnabled ? "justify-between" : "justify-end" // Pin button visible with RMB, so justify-between then
+      )}>
+        {isRmbControlEnabled && ( // Pin button is visible if RMB control is enabled
+          <button
+            onClick={toggleSidebarPin}
+            className="p-1 text-gray-700 hover:text-gray-900 hover:bg-black/5 rounded-md transition-colors"
+            aria-label={isSidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
+          >
+            {isSidebarPinned ? (
+              <PinOffIcon className="h-4 w-4" />
+            ) : (
+              <PinIcon className="h-4 w-4" />
+            )}
+          </button>
+        )}
+        {/* Re-add this BurgerIcon instance */}
+        <BurgerIcon
+            isOpen={true} // Always an X because sidebar is open
+            onClick={requestClose}
+            className="text-gray-700 p-1 h-7 w-7 hover:bg-black/5 rounded-md transition-colors flex items-center justify-center"
+        />
       </div>
-
       {/* User Info */}
       <div className="p-4"> {/* Removed border-b and border-slate-700/50 */}
         <div className="flex items-center">
