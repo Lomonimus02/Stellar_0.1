@@ -31,7 +31,7 @@ import { UserRoleEnum } from "@shared/schema";
 import { TeacherClassesMenu } from "./teacher-classes-menu";
 import { SchoolAdminScheduleMenu } from "./school-admin-schedule-menu";
 // useState, useEffect might be partially unneeded, will adjust if they become fully unused
-import { ReactNode, forwardRef, useState, useEffect } from "react"; 
+import { ReactNode, forwardRef, useState, useEffect, useRef } from "react"; // Added useRef
 import { useSettings } from "@/contexts/SettingsContext"; // Import useSettings
 
 // const RMB_SIDEBAR_CONTROL_LS_KEY = 'enableRmbSidebarControl'; // REMOVED
@@ -80,9 +80,14 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
   const { user } = useAuth();
   const { isRmbControlEnabled } = useSettings(); 
   const dragStartRef = useRef<{ x: number; y: number; sidebarX: number; sidebarY: number } | null>(null);
-  const [showMagnetHint, setShowMagnetHint] = useState<boolean>(false); // New state
+  const [showMagnetHint, setShowMagnetHint] = useState<boolean>(false);
+  const prevShowMagnetHintRef = useRef(showMagnetHint); // For logging changes
 
   const X_MAGNET_THRESHOLD = 50; // Pixels from left edge for magnet hint
+
+  useEffect(() => { // Update ref when showMagnetHint changes
+    prevShowMagnetHintRef.current = showMagnetHint;
+  }, [showMagnetHint]);
 
   const handleNavLinkClick = () => {
     if (!isSidebarPinned && isOpen) {
@@ -156,8 +161,10 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
     let newX = position.x;
     let newY = position.y;
 
-    // Boundary checks (apply whenever a position is being used)
-    if (typeof window !== 'undefined') { // Ensure window context for innerWidth/Height
+    // Boundary checks should only apply if the sidebar is NOT pinned OR if it's actively being dragged.
+    const shouldApplyBoundaryChecks = dragStartRef.current || !isSidebarPinned;
+
+    if (shouldApplyBoundaryChecks && typeof window !== 'undefined') { 
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
         const sidebarCurrentHeight = (ref && typeof ref === 'object' && ref.current)
@@ -168,7 +175,7 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
         newY = Math.max(screenEdgePadding, Math.min(newY, viewportHeight - sidebarCurrentHeight - screenEdgePadding));
     }
     
-    sidebarStyle.top = `${newY}px`;
+    sidebarStyle.top = `${newY}px`; 
     sidebarStyle.left = `${newX}px`;
   } else {
     // Default position (typically when pinned to the edge without a specific 'position' value)
@@ -177,9 +184,11 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
   }
 
   const handleMouseDown = (e: React.MouseEvent<HTMLElement>) => {
-    // Only allow dragging with the primary mouse button (usually left)
-    // and if RMB mode is on and sidebar is not pinned
-    if (e.button !== 0 || !isRmbControlEnabled || isSidebarPinned || !isOpen) {
+    const isDraggable = isRmbControlEnabled && !isSidebarPinned && isOpen;
+    // Example: console.log('[Sidebar] MouseDown: Draggable?', { rmb: isRmbControlEnabled, pinned: isSidebarPinned, open: isOpen });
+    console.log('[Sidebar] MouseDown: Draggable Check', { rmb: isRmbControlEnabled, pinned: isSidebarPinned, open: isOpen, isDraggable });
+
+    if (e.button !== 0 || !isDraggable) {
       return;
     }
 
@@ -203,10 +212,11 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+    console.log('[Sidebar] MouseDown: Drag Started', { dragStartRefCurrent: dragStartRef.current });
   };
 
   const handleMouseMove = (e: MouseEvent) => {
-    if (!dragStartRef.current || !isOpen || isSidebarPinned) return; // Do not process if pinned
+    if (!dragStartRef.current || !isOpen || isSidebarPinned) return;
 
     const deltaX = e.clientX - dragStartRef.current.x;
     const deltaY = e.clientY - dragStartRef.current.y;
@@ -215,27 +225,43 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
 
     setSidebarPosition({ x: newX, y: newY });
 
-    // Magnet hint logic: only if RMB control is enabled and sidebar is not pinned
-    if (isRmbControlEnabled && !isSidebarPinned) {
+    // Magnet hint logic
+    let newHintState = false;
+    const canShowHint = isRmbControlEnabled && !isSidebarPinned;
+    if (canShowHint) {
       if (e.clientX < X_MAGNET_THRESHOLD) {
-        setShowMagnetHint(true);
-      } else {
-        setShowMagnetHint(false);
+        newHintState = true;
       }
-    } else {
-      setShowMagnetHint(false); // Ensure hint is off if conditions not met
+    }
+    if (prevShowMagnetHintRef.current !== newHintState) {
+      // Example: console.log('[Sidebar] MouseMove: Hint Check', { clientX: e.clientX, threshold: X_MAGNET_THRESHOLD, newHintState: /* new showMagnetHint value */, pinned: isSidebarPinned });
+      console.log('[Sidebar] MouseMove: Hint Check', { clientX: e.clientX, threshold: X_MAGNET_THRESHOLD, newHintState: newHintState, oldHintState: prevShowMagnetHintRef.current, pinnedCheck: isSidebarPinned, rmbEnabledCheck: isRmbControlEnabled });
+      setShowMagnetHint(newHintState);
     }
   };
 
-  const handleMouseUp = (event: MouseEvent) => { // Added event to read clientX
-    const currentMouseX = event.clientX; // Store mouse X before clearing ref
+  const handleMouseUp = (event: MouseEvent) => { 
+    const wasDragging = !!dragStartRef.current; // Capture before nulling
+    const shouldCallSnap = wasDragging && showMagnetHint && position;
+    
+    // Example: console.log('[Sidebar] MouseUp: Magnet Snap Call Check', { wasDragging: !!dragStartRef.current, hint: showMagnetHint, position: position, shouldCallSnap: /* boolean result of condition */ });
+    console.log('[Sidebar] MouseUp: Magnet Snap Call Check', { 
+      wasDraggingAtStartOfMouseUp: wasDragging, 
+      currentShowMagnetHint: showMagnetHint, 
+      currentPositionProp: position, 
+      shouldCallSnapLogic: shouldCallSnap 
+    });
 
-    if (dragStartRef.current && showMagnetHint && position && !isSidebarPinned && isRmbControlEnabled && currentMouseX < X_MAGNET_THRESHOLD) {
-      handleRequestMagnetSnap(position); // Pass last known good position
+    if (shouldCallSnap) {
+      console.log('[Sidebar] MouseUp: Calling handleRequestMagnetSnap', { position });
+      handleRequestMagnetSnap(position!); // position is checked in shouldCallSnap
     }
     
     dragStartRef.current = null;
-    setShowMagnetHint(false); // Reset hint
+    if (showMagnetHint) { 
+      setShowMagnetHint(false); 
+      console.log('[Sidebar] MouseUp: Reset showMagnetHint to false');
+    }
     document.body.style.userSelect = ''; 
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', handleMouseUp);
@@ -272,7 +298,7 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
         isOpen ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none",
         (!isSidebarPinned && isRmbControlEnabled && isOpen && !dragStartRef.current) ? "cursor-grab" : "", 
         dragStartRef.current ? "cursor-grabbing" : "",
-        showMagnetHint && !isSidebarPinned ? "outline outline-2 outline-offset-2 outline-blue-500 shadow-2xl" : "" // Magnet hint styling
+        (console.log('[Sidebar] Render: Hint Class Check', { hint: showMagnetHint, pinned: isSidebarPinned }), showMagnetHint && !isSidebarPinned ? "outline outline-2 outline-offset-2 outline-blue-500 shadow-2xl" : "")
       )}
       style={sidebarStyle}
     >

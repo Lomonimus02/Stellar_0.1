@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils";
 import { useSettings } from "@/contexts/SettingsContext"; // Import useSettings
 
 // const RMB_SIDEBAR_CONTROL_LS_KEY = 'enableRmbSidebarControl'; // REMOVED - Context handles this key
-const SIDEBAR_PINNED_LS_KEY = 'sidebarPinned'; // Key for persisting adapted state
+const SIDEBAR_PINNED_LS_KEY = 'sidebarPinned'; // Key for persisting general pinned state (content adaptation)
+const SIDEBAR_CUSTOM_POSITION_LS_KEY = 'sidebarCustomPosition'; // Key for custom pinned position
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -26,48 +27,101 @@ const getInitialLocalStorageBool = (key: string, defaultValue: boolean): boolean
 export function MainLayout({ children, className }: MainLayoutProps) {
   const { isRmbControlEnabled } = useSettings(); // Get RMB state from context
 
-  // Initialize isSidebarPinned (content adaptation state)
-  const initialIsPinnedFromStorage = getInitialLocalStorageBool(SIDEBAR_PINNED_LS_KEY, false);
-  const [isSidebarPinned, setIsSidebarPinned] = useState<boolean>(initialIsPinnedFromStorage);
+  // Initialize states from localStorage
+  const initialWasPinnedAndOpen = getInitialLocalStorageBool(SIDEBAR_PINNED_LS_KEY, false);
 
-  // Initialize sidebarOpen state
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(initialIsPinnedFromStorage); 
-  const [isMagnetizedToLeft, setIsMagnetizedToLeft] = useState<boolean>(false); // New state
+  const getInitialCustomPosition = (): { x: number; y: number } | null => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(SIDEBAR_CUSTOM_POSITION_LS_KEY);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          // Basic validation for position object
+          if (typeof parsed === 'object' && parsed !== null && 'x' in parsed && 'y' in parsed) {
+            return parsed;
+          } else {
+            localStorage.removeItem(SIDEBAR_CUSTOM_POSITION_LS_KEY); // Clear invalid data
+          }
+        } catch (e) {
+          localStorage.removeItem(SIDEBAR_CUSTOM_POSITION_LS_KEY); // Clear corrupted data
+        }
+      }
+    }
+    return null;
+  };
+  const initialCustomPosition = getInitialCustomPosition();
+
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(initialWasPinnedAndOpen);
   
-  const [sidebarPosition, setSidebarPosition] = useState<{ x: number, y: number } | null>(null);
+  const [isSidebarPinned, setIsSidebarPinned] = useState<boolean>(initialWasPinnedAndOpen);
+
+  const [sidebarPosition, setSidebarPosition] = useState<{ x: number; y: number } | null>(() => {
+    // If it was pinned and a custom position was stored, use it.
+    // This assumes that if a custom position is stored, RBM mode was active, and it was pinned there.
+    if (initialWasPinnedAndOpen && initialCustomPosition) {
+      return initialCustomPosition;
+    }
+    return null; // Otherwise, default to null (magnetized or not open/pinned)
+  });
+
+  const [isMagnetizedToLeft, setIsMagnetizedToLeft] = useState<boolean>(() => {
+    // Magnetized if it was pinned and open, but NO custom position was stored.
+    return initialWasPinnedAndOpen && !initialCustomPosition;
+  });
+  
   const [isAnimatingPin, setIsAnimatingPin] = useState<boolean>(false);
   const sidebarRef = useRef<HTMLElement | null>(null);
   const prevRmbEnabledRef = useRef(isRmbControlEnabled); // Will now track context value
 
   // Removed burgerWrapperStyle and burgerWrapperClasses
 
-  // useEffect for persisting isSidebarPinned state (adapted state)
+  // useEffect for persisting isSidebarPinned state (general pinned state for content adaptation)
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      // SIDEBAR_PINNED_LS_KEY now tracks if the sidebar was open AND pinned (either magnetized or custom)
       localStorage.setItem(SIDEBAR_PINNED_LS_KEY, JSON.stringify(isSidebarPinned && sidebarOpen));
     }
   }, [isSidebarPinned, sidebarOpen]);
 
-  // Removed useEffect for 'storage' event listening for RMB_SIDEBAR_CONTROL_LS_KEY
-  // Context provider handles localStorage updates and reactivity for isRmbControlEnabled.
-
-  // useEffect for when isRmbControlEnabled (from context) changes
+  // useEffect for persisting sidebarCustomPosition state
   useEffect(() => {
-    // If isRmbControlEnabled has changed from false to true (i.e., was just toggled ON)
-    if (isRmbControlEnabled && !prevRmbEnabledRef.current) {
+    let action = 'idle_or_custom_pos_invalid';
+    if (typeof window !== 'undefined') {
+      if (sidebarOpen && isSidebarPinned && !isMagnetizedToLeft && sidebarPosition) {
+        localStorage.setItem(SIDEBAR_CUSTOM_POSITION_LS_KEY, JSON.stringify(sidebarPosition));
+        action = 'saving custom position';
+      } else {
+        if (localStorage.getItem(SIDEBAR_CUSTOM_POSITION_LS_KEY) !== null) {
+            localStorage.removeItem(SIDEBAR_CUSTOM_POSITION_LS_KEY);
+            action = 'removing custom position';
+        } else {
+            action = 'no custom position to remove / already null';
+        }
+      }
+    }
+    // Example: console.log('[MainLayout] Persist Custom Pos Effect', { open: sidebarOpen, pinned: isSidebarPinned, magnetized: isMagnetizedToLeft, position: sidebarPosition, action: /* 'saving' or 'removing' */ });
+    console.log('[MainLayout] Persist Custom Pos Effect', { open: sidebarOpen, pinned: isSidebarPinned, magnetized: isMagnetizedToLeft, positionVal: sidebarPosition, action });
+  }, [sidebarPosition, isSidebarPinned, isMagnetizedToLeft, sidebarOpen]);
+
+
+  // useEffect for when isRmbControlEnabled (from context) changes - this can override loaded states
+  useEffect(() => {
+    if (isRmbControlEnabled && !prevRmbEnabledRef.current) { // RMB Toggled ON
+      // When RMB is enabled, default to open, pinned, and magnetized state, overriding any loaded custom pin.
       setSidebarOpen(true);
       setIsSidebarPinned(true);
-      setSidebarPosition(null);
-      setIsMagnetizedToLeft(true); // Magnetized when RMB enabled and sidebar defaults to pinned left
-    }
-    // If isRmbControlEnabled has changed from true to false (i.e., was just toggled OFF)
-    else if (!isRmbControlEnabled && prevRmbEnabledRef.current) {
+      setSidebarPosition(null); // Null position means it will use default (magnetized)
+      setIsMagnetizedToLeft(true);
+    } else if (!isRmbControlEnabled && prevRmbEnabledRef.current) { // RMB Toggled OFF
+      // When RMB is disabled, sidebar closes by default.
+      // If it was custom pinned, that state is lost in favor of the default RBM disabled behavior.
       setSidebarOpen(false);
       setIsSidebarPinned(false);
       setIsMagnetizedToLeft(false);
+      // sidebarPosition will be handled by handleRequestClose if user opens it
     }
     prevRmbEnabledRef.current = isRmbControlEnabled;
-  }, [isRmbControlEnabled]); // Dependencies: isRmbControlEnabled (from context)
+  }, [isRmbControlEnabled]);
 
   const toggleSidebar = () => {
     // If opening: Call setSidebarOpen(true) AND setIsSidebarPinned(true).
@@ -130,11 +184,31 @@ export function MainLayout({ children, className }: MainLayoutProps) {
 
   const LEFT_EDGE_OFFSET = 16; // 1rem
   const handleRequestMagnetSnap = (currentPosition: { x: number, y: number }) => {
-    setSidebarPosition({ x: LEFT_EDGE_OFFSET, y: currentPosition.y });
-    setIsMagnetizedToLeft(true);
-    setIsSidebarPinned(true);
-    setSidebarOpen(true);
-    // Potentially, persist isMagnetizedToLeft to localStorage if needed
+    // Example: console.log('[MainLayout] handleRequestMagnetSnap: Entry', { currentPosition });
+    console.log('[MainLayout] handleRequestMagnetSnap: Entry', { currentPosition });
+    
+    const newPos = { x: LEFT_EDGE_OFFSET, y: currentPosition.y };
+    const newMagnetState = true;
+    const newPinState = true;
+    const newOpenState = true;
+
+    // Log intended values BEFORE async setState calls
+    // Example: console.log('[MainLayout] handleRequestMagnetSnap: States Updated', { newPos: sidebarPosition, newMagnet: isMagnetizedToLeft, newPin: isSidebarPinned, newOpen: sidebarOpen });
+    console.log('[MainLayout] handleRequestMagnetSnap: States Update Intent', { 
+        currentSidebarPositionState: sidebarPosition, 
+        currentIsMagnetizedState: isMagnetizedToLeft,
+        currentIsPinnedState: isSidebarPinned,    
+        currentIsOpenState: sidebarOpen,          
+        newPosToSet: newPos, 
+        newMagnetToSet: newMagnetState, 
+        newPinToSet: newPinState, 
+        newOpenToSet: newOpenState 
+    });
+
+    setSidebarPosition(newPos);
+    setIsMagnetizedToLeft(newMagnetState);
+    setIsSidebarPinned(newPinState);
+    setSidebarOpen(newOpenState);
   };
 
   useEffect(() => {
@@ -215,14 +289,15 @@ export function MainLayout({ children, className }: MainLayoutProps) {
         className={cn(
           "fixed z-50 top-2 left-2", // Base position
           "transition-all duration-300 ease-in-out", // Transitions for opacity and transform (scale)
-          (isRmbControlEnabled && !sidebarOpen) // MODIFIED Condition for visibility
+          // New condition: Visible if RMB is DISabled AND sidebar is closed
+          (!isRmbControlEnabled && !sidebarOpen)
             ? "opacity-100 scale-100 pointer-events-auto"
             : "opacity-0 scale-90 pointer-events-none" // Hidden state with slight scale down
         )}
       >
         <BurgerIcon
-            isOpen={false} // Always a burger, as it's the opener for RMB enabled mode
-            onClick={toggleSidebar} // toggleSidebar is designed to open it to default pinned/magnetized
+            isOpen={false} // This global burger is always an opener
+            onClick={handleRequestClose} // When RBM is disabled, handleRequestClose toggles the sidebar
             className="text-slate-600 p-1 h-7 w-7 hover:bg-black/10 rounded-full backdrop-blur-sm focus-visible:ring-2 focus-visible:ring-slate-500/70 flex items-center justify-center"
           />
         </div>
@@ -247,7 +322,7 @@ export function MainLayout({ children, className }: MainLayoutProps) {
           "pr-4 pb-4", 
           "transition-all duration-300 ease-in-out", 
           // Content adaptation logic: if magnetized to left and open, apply padding.
-          isMagnetizedToLeft && sidebarOpen ? "md:pl-[288px] pl-6" : "md:pl-20 pl-6" 
+          (console.log('[MainLayout] Render: Content Adapt Check', { magnetized: isMagnetizedToLeft, open: sidebarOpen }), isMagnetizedToLeft && sidebarOpen ? "md:pl-[288px] pl-6" : "md:pl-20 pl-6")
         )}
       >
         <main 
