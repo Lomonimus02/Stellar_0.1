@@ -53,20 +53,36 @@ type NavItem = LinkMenuItem | ComponentMenuItem;
 interface SidebarProps {
   isOpen: boolean;
   isSidebarPinned: boolean;
+  isMagnetizedToLeft: boolean; // New Prop
   toggleSidebarPin: () => void;
   requestClose: () => void;
-  setSidebarOpen: (isOpen: boolean) => void; // Added setSidebarOpen
-  position?: { x: number, y: number } | null; // New prop
-  isAnimatingPin?: boolean; // ADD this prop
+  setSidebarOpen: (isOpen: boolean) => void;
+  position?: { x: number, y: number } | null;
+  setSidebarPosition: (position: { x: number; y: number } | null) => void;
+  handleRequestMagnetSnap: (currentPosition: { x: number; y: number }) => void; // New Prop
+  isAnimatingPin?: boolean;
 }
 
 export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
-  ({ isOpen, isSidebarPinned, toggleSidebarPin, requestClose, setSidebarOpen, position, isAnimatingPin }, ref) => {
+  ({ 
+    isOpen, 
+    isSidebarPinned, 
+    isMagnetizedToLeft, // Destructure
+    toggleSidebarPin, 
+    requestClose, 
+    setSidebarOpen, 
+    position, 
+    setSidebarPosition, 
+    handleRequestMagnetSnap, // Destructure
+    isAnimatingPin 
+  }, ref) => {
   const [location] = useLocation();
   const { user } = useAuth();
-  const { isRmbControlEnabled } = useSettings(); // Get RMB state from context
+  const { isRmbControlEnabled } = useSettings(); 
+  const dragStartRef = useRef<{ x: number; y: number; sidebarX: number; sidebarY: number } | null>(null);
+  const [showMagnetHint, setShowMagnetHint] = useState<boolean>(false); // New state
 
-  // Removed local state and effect for isRmbControlEnabled
+  const X_MAGNET_THRESHOLD = 50; // Pixels from left edge for magnet hint
 
   const handleNavLinkClick = () => {
     if (!isSidebarPinned && isOpen) {
@@ -133,71 +149,172 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
   const sidebarNominalWidth = 256; // w-64
   const screenEdgePadding = 16; // 1rem, for keeping sidebar off the very edge
 
-  // console.log('[Sidebar] Rendering. isOpen:', isOpen, 'isSidebarPinned:', isSidebarPinned, 'position:', position, 'isAnimatingPin:', isAnimatingPin);
+  // Style decision:
+  // 1. If 'position' is provided, use it (applies to floating or pinned-at-custom-location).
+  // 2. If 'position' is null, use default pinned styles (top: 1rem, left: 1rem).
+  if (position) {
+    let newX = position.x;
+    let newY = position.y;
 
-  if (position && !isSidebarPinned) { // Condition changed: isOpen removed from here
-    let top = position.y;
-    let left = position.x;
+    // Boundary checks (apply whenever a position is being used)
+    if (typeof window !== 'undefined') { // Ensure window context for innerWidth/Height
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const sidebarCurrentHeight = (ref && typeof ref === 'object' && ref.current)
+                                    ? ref.current.offsetHeight
+                                    : viewportHeight - 2 * screenEdgePadding; // Estimate
 
-    // Adjust if too close to the right edge
-    if (left + sidebarNominalWidth + screenEdgePadding > window.innerWidth) {
-      left = window.innerWidth - sidebarNominalWidth - screenEdgePadding;
+        newX = Math.max(screenEdgePadding, Math.min(newX, viewportWidth - sidebarNominalWidth - screenEdgePadding));
+        newY = Math.max(screenEdgePadding, Math.min(newY, viewportHeight - sidebarCurrentHeight - screenEdgePadding));
     }
-    // Adjust if too close to the bottom edge
-    const sidebarCurrentHeight = (ref && typeof ref === 'object' && ref.current) 
-                                  ? ref.current.offsetHeight 
-                                  : (window.innerHeight - 2 * screenEdgePadding);
-    if (top + sidebarCurrentHeight + screenEdgePadding > window.innerHeight) {
-      top = window.innerHeight - sidebarCurrentHeight - screenEdgePadding;
-    }
-
-    // Ensure it's not off the top or left edge
-    sidebarStyle.top = Math.max(screenEdgePadding, top) + 'px';
-    sidebarStyle.left = Math.max(screenEdgePadding, left) + 'px';
-    // console.log('[Sidebar] Style: DYNAMIC/UNPINNED. top:', sidebarStyle.top, 'left:', sidebarStyle.left, 'isOpen:', isOpen);
+    
+    sidebarStyle.top = `${newY}px`;
+    sidebarStyle.left = `${newX}px`;
   } else {
-    // Default position for pinned state or when not dynamically positioned
-    sidebarStyle.top = '1rem';
-    sidebarStyle.left = '1rem';
-    // console.log('[Sidebar] Style: DEFAULT/PINNED. top: 1rem, left: 1rem, isOpen:', isOpen);
+    // Default position (typically when pinned to the edge without a specific 'position' value)
+    sidebarStyle.top = '1rem'; 
+    sidebarStyle.left = '1rem'; 
   }
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLElement>) => {
+    // Only allow dragging with the primary mouse button (usually left)
+    // and if RMB mode is on and sidebar is not pinned
+    if (e.button !== 0 || !isRmbControlEnabled || isSidebarPinned || !isOpen) {
+      return;
+    }
+
+    // Prevent dragging if clicking on interactive elements like buttons or links
+    const targetElement = e.target as HTMLElement;
+    if (targetElement.closest('button, a')) {
+        return;
+    }
+
+    // Prevent text selection during drag
+    document.body.style.userSelect = 'none';
+
+    const sidebarRect = (ref as React.RefObject<HTMLElement>)?.current?.getBoundingClientRect();
+    
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      sidebarX: sidebarRect?.left || position?.x || screenEdgePadding,
+      sidebarY: sidebarRect?.top || position?.y || screenEdgePadding,
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!dragStartRef.current || !isOpen || isSidebarPinned) return; // Do not process if pinned
+
+    const deltaX = e.clientX - dragStartRef.current.x;
+    const deltaY = e.clientY - dragStartRef.current.y;
+    const newX = dragStartRef.current.sidebarX + deltaX;
+    const newY = dragStartRef.current.sidebarY + deltaY;
+
+    setSidebarPosition({ x: newX, y: newY });
+
+    // Magnet hint logic: only if RMB control is enabled and sidebar is not pinned
+    if (isRmbControlEnabled && !isSidebarPinned) {
+      if (e.clientX < X_MAGNET_THRESHOLD) {
+        setShowMagnetHint(true);
+      } else {
+        setShowMagnetHint(false);
+      }
+    } else {
+      setShowMagnetHint(false); // Ensure hint is off if conditions not met
+    }
+  };
+
+  const handleMouseUp = (event: MouseEvent) => { // Added event to read clientX
+    const currentMouseX = event.clientX; // Store mouse X before clearing ref
+
+    if (dragStartRef.current && showMagnetHint && position && !isSidebarPinned && isRmbControlEnabled && currentMouseX < X_MAGNET_THRESHOLD) {
+      handleRequestMagnetSnap(position); // Pass last known good position
+    }
+    
+    dragStartRef.current = null;
+    setShowMagnetHint(false); // Reset hint
+    document.body.style.userSelect = ''; 
+    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('mouseup', handleMouseUp);
+  };
+
+  // Cleanup global listeners when component unmounts or relevant conditions change
+  useEffect(() => {
+    return () => {
+      if (dragStartRef.current) { // If dragging was in progress
+        document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      }
+    };
+  }, []); // Empty dependency array for unmount cleanup
 
   return (
     <aside
       ref={ref}
+      onMouseDown={handleMouseDown} // Attach mouse down handler
       className={cn(
-        "fixed z-40 w-64 rounded-3xl max-h-[calc(100vh-2rem)]", // top-4, left-4 REMOVED
-        "bg-transparent backdrop-blur-2xl shadow-lg border border-white/15", // MODIFIED: bg-white/10 to bg-transparent
-        "overflow-y-auto sidebar overflow-hidden sidebar-glowing-effect", // `relative` removed, Scrolling, identifiers, effects
-        isAnimatingPin ? "transition-all duration-300 ease-in-out" : "transition-[opacity,transform] duration-300 ease-in-out", // CONDITIONAL TRANSITION
-        isOpen ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none" // Animation classes changed
+        "fixed z-40 w-64 rounded-3xl max-h-[calc(100vh-2rem)]",
+        "bg-transparent backdrop-blur-2xl shadow-lg border border-white/15",
+        "overflow-y-auto sidebar overflow-hidden sidebar-glowing-effect",
+        // Transition logic:
+        // During drag: Only opacity, transform, and hint properties transition. Top/left changes are immediate.
+        // During pin animation: All properties transition.
+        // Default idle state: All relevant properties transition.
+        dragStartRef.current
+          ? "transition-[opacity,transform,outline,outline-color,outline-offset,box-shadow] duration-300 ease-in-out"
+          : isAnimatingPin
+            ? "transition-all duration-300 ease-in-out"
+            : "transition-[opacity,transform,top,left,outline,outline-color,outline-offset,box-shadow] duration-300 ease-in-out",
+        isOpen ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none",
+        (!isSidebarPinned && isRmbControlEnabled && isOpen && !dragStartRef.current) ? "cursor-grab" : "", 
+        dragStartRef.current ? "cursor-grabbing" : "",
+        showMagnetHint && !isSidebarPinned ? "outline outline-2 outline-offset-2 outline-blue-500 shadow-2xl" : "" // Magnet hint styling
       )}
-      style={sidebarStyle} // ADDED style attribute
+      style={sidebarStyle}
     >
-      {/* Sidebar Header: Pin and Close buttons */}
+      {/* Sidebar Header: Pin and Close buttons OR Toggle button */}
       <div className={cn(
-        "flex items-center p-3", // Common styling, p-3 is for padding within the header
-        isRmbControlEnabled ? "justify-between" : "justify-end" // Pin button visible with RMB, so justify-between then
+        "flex items-center p-3",
+        isRmbControlEnabled ? "justify-between" : "justify-end"
       )}>
-        {isRmbControlEnabled && ( // Pin button is visible if RMB control is enabled
-          <button
-            onClick={toggleSidebarPin}
-            className="p-1 text-gray-700 hover:text-gray-900 hover:bg-black/5 rounded-md transition-colors"
-            aria-label={isSidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
-          >
-            {isSidebarPinned ? (
-              <PinOffIcon className="h-4 w-4" />
-            ) : (
-              <PinIcon className="h-4 w-4" />
-            )}
-          </button>
+        {isRmbControlEnabled ? (
+          <>
+            {/* Pin button - visible only if RMB control is enabled */}
+            <button
+              onClick={toggleSidebarPin}
+              className="p-1 text-gray-700 hover:text-gray-900 hover:bg-black/5 rounded-md transition-colors"
+              aria-label={isSidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
+            >
+              {isSidebarPinned ? (
+                <PinOffIcon className="h-4 w-4" />
+              ) : (
+                <PinIcon className="h-4 w-4" />
+              )}
+            </button>
+            {/* Close ('X') button - visible only if RMB control is enabled */}
+            <BurgerIcon
+              isOpen={true} // Always an X for RMB enabled mode, as sidebar is open
+              onClick={requestClose} // requestClose will just close it
+              className="text-gray-700 p-1 h-7 w-7 hover:bg-black/5 rounded-md transition-colors flex items-center justify-center"
+            />
+          </>
+        ) : (
+          <>
+            {/* Burger/X toggle button - visible only if RMB control is DISabled */}
+            {/* This button is only shown if the sidebar itself is open, due to the sidebar's own visibility.
+                Its state (burger or X) depends on the sidebar's isOpen prop.
+                Its onClick (requestClose) will toggle the sidebar via main-layout's modified logic. */}
+            <BurgerIcon
+              isOpen={isOpen} // Dynamic: burger if sidebar closed, X if open
+              onClick={requestClose} // requestClose will toggle it in RBM disabled mode
+              className="text-gray-700 p-1 h-7 w-7 hover:bg-black/5 rounded-md transition-colors flex items-center justify-center"
+            />
+          </>
         )}
-        {/* Re-add this BurgerIcon instance */}
-        <BurgerIcon
-            isOpen={true} // Always an X because sidebar is open
-            onClick={requestClose}
-            className="text-gray-700 p-1 h-7 w-7 hover:bg-black/5 rounded-md transition-colors flex items-center justify-center"
-        />
       </div>
       {/* User Info */}
       <div className="p-4"> {/* Removed border-b and border-slate-700/50 */}

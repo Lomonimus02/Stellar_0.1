@@ -32,6 +32,7 @@ export function MainLayout({ children, className }: MainLayoutProps) {
 
   // Initialize sidebarOpen state
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(initialIsPinnedFromStorage); 
+  const [isMagnetizedToLeft, setIsMagnetizedToLeft] = useState<boolean>(false); // New state
   
   const [sidebarPosition, setSidebarPosition] = useState<{ x: number, y: number } | null>(null);
   const [isAnimatingPin, setIsAnimatingPin] = useState<boolean>(false);
@@ -56,12 +57,14 @@ export function MainLayout({ children, className }: MainLayoutProps) {
     if (isRmbControlEnabled && !prevRmbEnabledRef.current) {
       setSidebarOpen(true);
       setIsSidebarPinned(true);
-      setSidebarPosition(null); 
+      setSidebarPosition(null);
+      setIsMagnetizedToLeft(true); // Magnetized when RMB enabled and sidebar defaults to pinned left
     }
     // If isRmbControlEnabled has changed from true to false (i.e., was just toggled OFF)
     else if (!isRmbControlEnabled && prevRmbEnabledRef.current) {
       setSidebarOpen(false);
       setIsSidebarPinned(false);
+      setIsMagnetizedToLeft(false);
     }
     prevRmbEnabledRef.current = isRmbControlEnabled;
   }, [isRmbControlEnabled]); // Dependencies: isRmbControlEnabled (from context)
@@ -71,29 +74,31 @@ export function MainLayout({ children, className }: MainLayoutProps) {
     // If closing: Call setSidebarOpen(false) AND setIsSidebarPinned(false).
     if (!sidebarOpen) {
       setSidebarOpen(true);
-      setIsSidebarPinned(true); // Content adapts, sidebar uses default pinned position
-      setSidebarPosition(null); // Ensure it uses default pinned position
+      setIsSidebarPinned(true); 
+      setSidebarPosition(null); 
+      setIsMagnetizedToLeft(true); // Magnetized when opened to default pinned state
     } else {
       setSidebarOpen(false);
-      setIsSidebarPinned(false); // Content un-adapts
+      setIsSidebarPinned(false); 
+      setIsMagnetizedToLeft(false);
     }
   };
 
   const toggleSidebarPin = () => {
-    // This function is called when the pin button *inside* the sidebar is clicked.
-    // It should toggle the isSidebarPinned state.
     const newPinState = !isSidebarPinned;
     setIsSidebarPinned(newPinState);
-    setIsAnimatingPin(true); // Start animation state
+    setIsAnimatingPin(true);
 
     if (newPinState) { // Pinning
-      setSidebarOpen(true); // Ensure it's open
-      setSidebarPosition(null); // Use default pinned position
+      setSidebarOpen(true);
+      if (sidebarPosition === null) { // Pinning to default left edge
+        setIsMagnetizedToLeft(true);
+      } else { // Pinning at a custom position
+        setIsMagnetizedToLeft(false);
+      }
     } else { // Unpinning
-      setSidebarOpen(true); // Sidebar remains open but now follows unpinned/floating logic
-      // Position might be set by RMB click later, or it defaults if not.
-      // If it was previously RMB opened at a position, that position is lost here, which is acceptable.
-      // User can re-open with RMB if they want specific floating position.
+      setSidebarOpen(true); 
+      setIsMagnetizedToLeft(false); // Unpinning always removes magnetization
     }
     
     setTimeout(() => {
@@ -101,11 +106,35 @@ export function MainLayout({ children, className }: MainLayoutProps) {
     }, 300); // Match this duration with Sidebar's transition duration
   };
   
-  const handleRequestClose = () => {
-    // Called by Sidebar's internal close burger.
-    // Should set setSidebarOpen(false) AND setIsSidebarPinned(false).
-    setSidebarOpen(false);
-    setIsSidebarPinned(false);
+  const handleRequestClose = () => { // This is called by the BurgerIcon INSIDE Sidebar
+    if (isRmbControlEnabled) {
+      // RBM Enabled: 'X' button on sidebar always closes and unpins/unmagnetizes
+      setSidebarOpen(false);
+      setIsSidebarPinned(false);
+      setIsMagnetizedToLeft(false);
+      // setSidebarPosition(null); // Optional: reset position if you want it to forget where it was
+    } else {
+      // RBM Disabled: Burger/X icon on sidebar toggles
+      if (sidebarOpen) {
+        setSidebarOpen(false);
+        setIsSidebarPinned(false); // Content un-adapts
+        setIsMagnetizedToLeft(false); // Not magnetized
+      } else {
+        setSidebarOpen(true);
+        setIsSidebarPinned(true);  // Content adapts
+        setSidebarPosition(null);  // Pins to default left
+        setIsMagnetizedToLeft(true); // Magnetized to default left
+      }
+    }
+  };
+
+  const LEFT_EDGE_OFFSET = 16; // 1rem
+  const handleRequestMagnetSnap = (currentPosition: { x: number, y: number }) => {
+    setSidebarPosition({ x: LEFT_EDGE_OFFSET, y: currentPosition.y });
+    setIsMagnetizedToLeft(true);
+    setIsSidebarPinned(true);
+    setSidebarOpen(true);
+    // Potentially, persist isMagnetizedToLeft to localStorage if needed
   };
 
   useEffect(() => {
@@ -120,27 +149,30 @@ export function MainLayout({ children, className }: MainLayoutProps) {
 
       // From this point, RMB control is ON, and it IS a right-click
       
-      if (isSidebarPinned && sidebarOpen) {
-        // Sidebar is already open and pinned. Do nothing with sidebar. Prevent default menu.
+      if (isSidebarPinned && sidebarOpen && isMagnetizedToLeft) { // If magnetized, RMB does nothing but prevent menu
         event.preventDefault();
         return;
       }
+      // If pinned but not magnetized (i.e., custom position), RMB might still be used to move/unpin later
+      // For now, if pinned at custom, also prevent default. This simplifies logic.
+      if (isSidebarPinned && sidebarOpen && !isMagnetizedToLeft) {
+        event.preventDefault(); 
+        // Potentially allow RMB to unpin from custom position in future? For now, no.
+        return;
+      }
 
-      // RMB control is ON, it's a right-click, and sidebar is NOT (open + pinned).
-      // This means sidebar is either closed, or open but floating.
-      event.preventDefault(); // Now we are definitely handling it.
+      event.preventDefault(); 
 
-      if (sidebarOpen) { // Sidebar is open and floating
-        // If click is outside the floating sidebar, close it.
+      if (sidebarOpen) { // Sidebar is open and floating (not pinned, not magnetized)
         if (sidebarRef.current && !sidebarRef.current.contains(event.target as Node)) {
           setSidebarOpen(false);
-          setIsSidebarPinned(false); // Should already be false, but good to be sure
+          // setIsSidebarPinned(false); // Already false
+          // setIsMagnetizedToLeft(false); // Already false
         }
-        // If click is inside the floating sidebar, do nothing.
       } else { // Sidebar is closed
-        // Open sidebar floating at click position
         setSidebarOpen(true);
-        setIsSidebarPinned(false); // Ensure it opens as floating
+        setIsSidebarPinned(false); 
+        setIsMagnetizedToLeft(false);
         setSidebarPosition({ x: event.clientX, y: event.clientY });
       }
     };
@@ -149,7 +181,7 @@ export function MainLayout({ children, className }: MainLayoutProps) {
     return () => {
       document.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [isRmbControlEnabled, sidebarOpen, isSidebarPinned, sidebarRef, setSidebarOpen, setIsSidebarPinned, setSidebarPosition]); // Updated dependencies
+  }, [isRmbControlEnabled, sidebarOpen, isSidebarPinned, isMagnetizedToLeft, sidebarRef, setSidebarOpen, setIsSidebarPinned, setSidebarPosition, setIsMagnetizedToLeft]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -158,12 +190,13 @@ export function MainLayout({ children, className }: MainLayoutProps) {
       }
       if (
         sidebarOpen &&
-        !isSidebarPinned && // Only close if it's floating (not content-adapted)
+        !isSidebarPinned && // Only close if it's floating
         sidebarRef.current &&
         !sidebarRef.current.contains(event.target as Node)
       ) {
         setSidebarOpen(false);
-        setIsSidebarPinned(false); // Ensure content un-adapts
+        // setIsSidebarPinned(false); // Already false
+        // setIsMagnetizedToLeft(false); // Already false
       }
     };
 
@@ -182,14 +215,14 @@ export function MainLayout({ children, className }: MainLayoutProps) {
         className={cn(
           "fixed z-50 top-2 left-2", // Base position
           "transition-all duration-300 ease-in-out", // Transitions for opacity and transform (scale)
-          (!isRmbControlEnabled && !sidebarOpen) // Condition for visibility
+          (isRmbControlEnabled && !sidebarOpen) // MODIFIED Condition for visibility
             ? "opacity-100 scale-100 pointer-events-auto"
             : "opacity-0 scale-90 pointer-events-none" // Hidden state with slight scale down
         )}
       >
         <BurgerIcon
-            isOpen={false} // Always a burger, as it's the opener
-            onClick={toggleSidebar}
+            isOpen={false} // Always a burger, as it's the opener for RMB enabled mode
+            onClick={toggleSidebar} // toggleSidebar is designed to open it to default pinned/magnetized
             className="text-slate-600 p-1 h-7 w-7 hover:bg-black/10 rounded-full backdrop-blur-sm focus-visible:ring-2 focus-visible:ring-slate-500/70 flex items-center justify-center"
           />
         </div>
@@ -197,11 +230,14 @@ export function MainLayout({ children, className }: MainLayoutProps) {
       <Sidebar 
         isOpen={sidebarOpen} 
         ref={sidebarRef} 
-        isSidebarPinned={isSidebarPinned} // This now means "content is adapted"
-        toggleSidebarPin={toggleSidebarPin} // For the pin button inside Sidebar
-        requestClose={handleRequestClose} // For the close button inside Sidebar
+        isSidebarPinned={isSidebarPinned}
+        isMagnetizedToLeft={isMagnetizedToLeft} // Pass down new state
+        toggleSidebarPin={toggleSidebarPin}
+        requestClose={handleRequestClose}
         setSidebarOpen={setSidebarOpen} 
-        position={sidebarPosition} 
+        position={sidebarPosition}
+        setSidebarPosition={setSidebarPosition}
+        handleRequestMagnetSnap={handleRequestMagnetSnap} // Pass down new handler
         isAnimatingPin={isAnimatingPin} 
       />
       
@@ -210,8 +246,8 @@ export function MainLayout({ children, className }: MainLayoutProps) {
           "h-full flex flex-col overflow-y-auto", 
           "pr-4 pb-4", 
           "transition-all duration-300 ease-in-out", 
-          // Content adaptation logic: if isSidebarPinned is true (and sidebarOpen must be true for this state), apply padding.
-          isSidebarPinned ? "md:pl-[288px] pl-6" : "md:pl-20 pl-6" 
+          // Content adaptation logic: if magnetized to left and open, apply padding.
+          isMagnetizedToLeft && sidebarOpen ? "md:pl-[288px] pl-6" : "md:pl-20 pl-6" 
         )}
       >
         <main 
