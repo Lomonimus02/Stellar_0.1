@@ -68,6 +68,7 @@ export function MainLayout({ children, className }: MainLayoutProps) {
     // Magnetized if it was pinned and open, but NO custom position was stored.
     return initialWasPinnedAndOpen && !initialCustomPosition;
   });
+  const [justUnpinnedFromMagnetized, setJustUnpinnedFromMagnetized] = useState<boolean>(false); // For cool-down
   
   const [isAnimatingPin, setIsAnimatingPin] = useState<boolean>(false);
   const sidebarRef = useRef<HTMLElement | null>(null);
@@ -75,11 +76,33 @@ export function MainLayout({ children, className }: MainLayoutProps) {
 
   // Removed burgerWrapperStyle and burgerWrapperClasses
 
+  // useEffect for logging initial state loaded from localStorage and context
+  useEffect(() => {
+    // initialWasPinnedAndOpen and initialCustomPosition are available from outer scope
+    console.log('[MainLayout] Initial State Loaded:', {
+      localStorageRawInitialWasPinnedAndOpen: initialWasPinnedAndOpen,
+      localStorageRawInitialCustomPosition: initialCustomPosition,
+      initialContextRmbControlEnabled: isRmbControlEnabled,
+      // Actual initial states of the component after useState initialization:
+      initialSidebarOpenState: sidebarOpen,
+      initialIsSidebarPinnedState: isSidebarPinned,
+      initialSidebarPositionState: sidebarPosition,
+      initialIsMagnetizedToLeftState: isMagnetizedToLeft
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array ensures this runs only once on mount
+
   // useEffect for persisting isSidebarPinned state (general pinned state for content adaptation)
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      const valueToStore = isSidebarPinned && sidebarOpen;
       // SIDEBAR_PINNED_LS_KEY now tracks if the sidebar was open AND pinned (either magnetized or custom)
-      localStorage.setItem(SIDEBAR_PINNED_LS_KEY, JSON.stringify(isSidebarPinned && sidebarOpen));
+      localStorage.setItem(SIDEBAR_PINNED_LS_KEY, JSON.stringify(valueToStore));
+      console.log('[MainLayout] Persisted Pinned State (SIDEBAR_PINNED_LS_KEY):', { 
+        isSidebarPinned, 
+        sidebarOpen, 
+        storedValue: valueToStore 
+      });
     }
   }, [isSidebarPinned, sidebarOpen]);
 
@@ -107,18 +130,19 @@ export function MainLayout({ children, className }: MainLayoutProps) {
   // useEffect for when isRmbControlEnabled (from context) changes - this can override loaded states
   useEffect(() => {
     if (isRmbControlEnabled && !prevRmbEnabledRef.current) { // RMB Toggled ON
-      // When RMB is enabled, default to open, pinned, and magnetized state, overriding any loaded custom pin.
+      // Default to open, pinned, and magnetized state.
       setSidebarOpen(true);
       setIsSidebarPinned(true);
-      setSidebarPosition(null); // Null position means it will use default (magnetized)
+      setSidebarPosition(null);
       setIsMagnetizedToLeft(true);
+      setJustUnpinnedFromMagnetized(false); // Clear any cool-down
     } else if (!isRmbControlEnabled && prevRmbEnabledRef.current) { // RMB Toggled OFF
-      // When RMB is disabled, sidebar closes by default.
-      // If it was custom pinned, that state is lost in favor of the default RBM disabled behavior.
+      // Default to collapsed, but conceptually pinned to the left (non-RMB mode default).
       setSidebarOpen(false);
-      setIsSidebarPinned(false);
-      setIsMagnetizedToLeft(false);
-      // sidebarPosition will be handled by handleRequestClose if user opens it
+      setIsSidebarPinned(true); // Default for non-RMB is pinned
+      setIsMagnetizedToLeft(true); // Default for non-RMB is magnetized
+      setSidebarPosition(null); // Default for non-RMB is at the edge
+      setJustUnpinnedFromMagnetized(false); // Clear any cool-down
     }
     prevRmbEnabledRef.current = isRmbControlEnabled;
   }, [isRmbControlEnabled]);
@@ -139,46 +163,63 @@ export function MainLayout({ children, className }: MainLayoutProps) {
   };
 
   const toggleSidebarPin = () => {
+    const wasMagnetizedBeforeToggle = isMagnetizedToLeft; // Capture state before it's changed
     const newPinState = !isSidebarPinned;
-    setIsSidebarPinned(newPinState);
-    setIsAnimatingPin(true);
 
-    if (newPinState) { // Pinning
-      setSidebarOpen(true);
-      if (sidebarPosition === null) { // Pinning to default left edge
-        setIsMagnetizedToLeft(true);
-      } else { // Pinning at a custom position
-        setIsMagnetizedToLeft(false);
-      }
-    } else { // Unpinning
-      setSidebarOpen(true); 
-      setIsMagnetizedToLeft(false); // Unpinning always removes magnetization
+    setIsSidebarPinned(newPinState);
+    setSidebarOpen(true); // Sidebar remains open whether pinning or unpinning.
+    setIsMagnetizedToLeft(false); // Pinning action always results in a custom pin or float, not auto-magnetized.
+
+    if (!newPinState && wasMagnetizedBeforeToggle) { // If UNPINNING from a magnetized state
+      setJustUnpinnedFromMagnetized(true);
+      console.log('[MainLayout] toggleSidebarPin: Unpinned from magnetized state, setting cool-down.');
+    } else if (newPinState) { // If PINNING action (creating a custom pin)
+      setJustUnpinnedFromMagnetized(false); // Clear cool-down, as this is a new deliberate state
+      console.log('[MainLayout] toggleSidebarPin: Pinning action, clearing cool-down.');
     }
+    // If unpinning from a non-magnetized state, justUnpinnedFromMagnetized remains as it was (likely false).
     
+    setIsAnimatingPin(true);
     setTimeout(() => {
       setIsAnimatingPin(false); // End animation state after duration
     }, 300); // Match this duration with Sidebar's transition duration
   };
+
+  const handleDragStartFromFloating = () => {
+    if (justUnpinnedFromMagnetized) {
+      console.log('[MainLayout] handleDragStartFromFloating: Resetting justUnpinnedFromMagnetized flag.');
+      setJustUnpinnedFromMagnetized(false);
+    }
+  };
   
-  const handleRequestClose = () => { // This is called by the BurgerIcon INSIDE Sidebar
-    if (isRmbControlEnabled) {
-      // RBM Enabled: 'X' button on sidebar always closes and unpins/unmagnetizes
+  const handleRequestClose = () => { // Called by Sidebar's internal close button or by clicking collapsed stub
+    if (sidebarOpen) { // Action is to CLOSE the sidebar
       setSidebarOpen(false);
-      setIsSidebarPinned(false);
-      setIsMagnetizedToLeft(false);
-      // setSidebarPosition(null); // Optional: reset position if you want it to forget where it was
-    } else {
-      // RBM Disabled: Burger/X icon on sidebar toggles
-      if (sidebarOpen) {
-        setSidebarOpen(false);
-        setIsSidebarPinned(false); // Content un-adapts
-        setIsMagnetizedToLeft(false); // Not magnetized
+      if (isRmbControlEnabled) {
+        // RBM ON: Closing makes it float (but closed). Position is retained.
+        setIsSidebarPinned(false);
+        setIsMagnetizedToLeft(false);
+        // setJustUnpinnedFromMagnetized(false); // Closing a floating RBM sidebar doesn't trigger cool-down by itself
       } else {
-        setSidebarOpen(true);
-        setIsSidebarPinned(true);  // Content adapts
-        setSidebarPosition(null);  // Pins to default left
-        setIsMagnetizedToLeft(true); // Magnetized to default left
+        // RBM OFF: Closing keeps it conceptually pinned and magnetized to left.
+        // States for isSidebarPinned, isMagnetizedToLeft, sidebarPosition should already be correct
+        // (true, true, null respectively) from initial load or RBM toggle OFF.
+        // No change needed to these for RBM OFF close.
       }
+    } else { // Action is to OPEN the sidebar (from collapsed stub)
+      setSidebarOpen(true);
+      if (isRmbControlEnabled) {
+        // RBM ON: Opening from stub snaps it to default magnetized pinned state
+        setIsSidebarPinned(true);
+        setIsMagnetizedToLeft(true);
+        setSidebarPosition(null);
+      } else {
+        // RBM OFF: Opening from stub ensures it's in default magnetized pinned state
+        setIsSidebarPinned(true);
+        setIsMagnetizedToLeft(true);
+        setSidebarPosition(null);
+      }
+      setJustUnpinnedFromMagnetized(false); // Opening always clears cool-down
     }
   };
 
@@ -187,7 +228,7 @@ export function MainLayout({ children, className }: MainLayoutProps) {
     // Example: console.log('[MainLayout] handleRequestMagnetSnap: Entry', { currentPosition });
     console.log('[MainLayout] handleRequestMagnetSnap: Entry', { currentPosition });
     
-    const newPos = { x: LEFT_EDGE_OFFSET, y: currentPosition.y };
+    const newPos = { x: LEFT_EDGE_OFFSET, y: LEFT_EDGE_OFFSET }; // Standardized Y position
     const newMagnetState = true;
     const newPinState = true;
     const newOpenState = true;
@@ -284,24 +325,7 @@ export function MainLayout({ children, className }: MainLayoutProps) {
   
   return (
     <div className="w-full h-screen"> 
-      {/* Main BurgerIcon wrapper - always rendered, visibility controlled by opacity/scale */}
-      <div
-        className={cn(
-          "fixed z-50 top-2 left-2", // Base position
-          "transition-all duration-300 ease-in-out", // Transitions for opacity and transform (scale)
-          // New condition: Visible if RMB is DISabled AND sidebar is closed
-          (!isRmbControlEnabled && !sidebarOpen)
-            ? "opacity-100 scale-100 pointer-events-auto"
-            : "opacity-0 scale-90 pointer-events-none" // Hidden state with slight scale down
-        )}
-      >
-        <BurgerIcon
-            isOpen={false} // This global burger is always an opener
-            onClick={handleRequestClose} // When RBM is disabled, handleRequestClose toggles the sidebar
-            className="text-slate-600 p-1 h-7 w-7 hover:bg-black/10 rounded-full backdrop-blur-sm focus-visible:ring-2 focus-visible:ring-slate-500/70 flex items-center justify-center"
-          />
-        </div>
-      )}
+      {/* Global BurgerIcon REMOVED */}
       <Sidebar 
         isOpen={sidebarOpen} 
         ref={sidebarRef} 
@@ -313,7 +337,9 @@ export function MainLayout({ children, className }: MainLayoutProps) {
         position={sidebarPosition}
         setSidebarPosition={setSidebarPosition}
         handleRequestMagnetSnap={handleRequestMagnetSnap} // Pass down new handler
-        isAnimatingPin={isAnimatingPin} 
+        isAnimatingPin={isAnimatingPin}
+        justUnpinnedFromMagnetized={justUnpinnedFromMagnetized} // Pass down cool-down flag
+        onDragStartFromFloating={handleDragStartFromFloating} // Pass down callback to reset flag
       />
       
       <div 
