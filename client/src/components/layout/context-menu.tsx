@@ -1,9 +1,11 @@
+// client/src/components/layout/context-menu.tsx
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { UserRoleEnum } from '@shared/schema';
 import { LogOutIcon, UsersIcon, ChevronDownIcon, CheckIcon } from 'lucide-react';
-import { cn } from "@/lib/utils"; // Import cn utility
+import { cn } from "@/lib/utils";
 
-// Helper to get readable role names
+// ... (getRoleName and interfaces remain the same)
 const getRoleName = (role: UserRoleEnum) => {
   const roleMap = {
     [UserRoleEnum.SUPER_ADMIN]: "Супер-Администратор",
@@ -45,21 +47,31 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   const menuRef = useRef<HTMLDivElement>(null);
   const [showRoleDropdown, setShowRoleDropdown] = React.useState(false);
   const [isAnimating, setIsAnimating] = React.useState(false);
+  const [portalNode, setPortalNode] = React.useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.document && window.document.body) {
+      setPortalNode(window.document.body);
+    }
+  }, []);
+
 
   useEffect(() => {
     if (isOpen) {
-      // Use a timeout to allow the component to mount with initial styles (opacity-0)
-      // then switch to final styles (opacity-100) to trigger the transition.
-      const timer = setTimeout(() => setIsAnimating(true), 10); // Small delay
+      const timer = setTimeout(() => setIsAnimating(true), 10);
       return () => clearTimeout(timer);
     } else {
-      setIsAnimating(false); // Reset for next open
+      setIsAnimating(false);
     }
   }, [isOpen]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        const clickedElement = event.target as HTMLElement;
+        if (clickedElement.closest('[data-radix-popper-content-wrapper]')) {
+            return;
+        }
         setShowRoleDropdown(false);
         onClose();
       }
@@ -77,7 +89,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen) {
+
+  if (!isOpen || !portalNode) {
     return null;
   }
 
@@ -103,63 +116,60 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
     return getRoleName(roleValue) === currentRoleName;
   };
 
-  return (
+  const menuContent = (
     <div
       ref={menuRef}
       className={cn(
-        "fixed z-50 font-sans text-gray-800 rounded-2xl", // Base classes
-        // Transition classes
+        "fixed z-50 font-sans rounded-2xl border", // border class is generic
         "transition-all duration-200 ease-out",
-        // Initial state (pre-animation)
-        isAnimating ? "opacity-100 scale-100" : "opacity-0 scale-95"
+        isAnimating ? "opacity-100 scale-100" : "opacity-0 scale-95",
+        // Styles to match sidebar's glass
+        "backdrop-blur-2xl bg-transparent border-white/15 text-slate-800 shadow-lg"
       )}
       style={{
         top: position.y,
         left: position.x,
-        // transformOrigin: 'top left', // Example if scale needs specific origin based on position
-        minWidth: '180px', // Keep current size
-        backdropFilter: 'blur(40px)', // Updated
-        backgroundColor: 'rgba(226, 232, 240, 0.15)', // REVERTED HERE
-        border: '1px solid rgba(226, 232, 240, 0.4)', // Updated, derived from bg color
-        boxShadow: 'none', // Explicitly remove shadow
-        overflow: 'hidden',
+        minWidth: '200px',
       }}
       onClick={(e) => e.stopPropagation()}
     >
       <ul className="py-1.5">
         {(availableRoles && availableRoles.length > 0) && (
         <li
-          className={`px-3 py-2 hover:bg-slate-400/10 cursor-pointer flex justify-between items-center transition-colors duration-150 ease-in-out ${availableRoles.length <= 1 ? 'opacity-70 cursor-default' : ''}`}
+          className={cn(
+            "mx-1.5 rounded-lg cursor-pointer flex justify-between items-center transition-colors duration-150 ease-in-out",
+            "px-4 py-3",
+            "hover:bg-white/10", // Adjusted hover for bg-transparent: very light white hover
+            availableRoles.length <= 1 ? 'opacity-70 cursor-default' : ''
+          )}
           onClick={handleRoleItemClick}
         >
           <div className="flex items-center">
-            <UsersIcon className="h-4 w-4 mr-2.5 text-gray-500" />
-            <span className="font-medium">{currentRoleName || "Роль не определена"}</span>
+            <UsersIcon className="h-4 w-4 mr-2.5 text-slate-700" />
+            <span className="font-medium text-sm text-slate-800">{currentRoleName || "Роль не определена"}</span>
           </div>
           {availableRoles.length > 1 && (
-            <ChevronDownIcon className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${showRoleDropdown ? 'rotate-180' : ''}`} />
+            <ChevronDownIcon className={`h-4 w-4 text-slate-600 transition-transform duration-200 ${showRoleDropdown ? 'rotate-180' : ''}`} />
           )}
         </li>
         )}
 
-        {/* Role Dropdown - always in DOM for CSS transitions */}
         <div
           className={cn(
-            "mt-1 mx-1.5 rounded-md shadow-inner", // shadow-inner can stay for depth
+            "mt-1 mx-1.5 rounded-lg", // Main rounding
             "transition-all duration-300 ease-in-out overflow-hidden",
-            showRoleDropdown && availableRoles.length > 1
-              ? "opacity-100 max-h-48 visible"
+            // Nested dropdown also gets transparent bg, but maybe slightly different border/shadow for hierarchy
+            "border-white/10", // Subtler border for nested
+            showRoleDropdown && availableRoles.length > 0
+              ? "opacity-100 max-h-48 visible backdrop-blur-xl bg-transparent shadow-md" // bg-transparent, smaller shadow
               : "opacity-0 max-h-0 invisible"
           )}
-          style={{
-            backgroundColor: 'rgba(226, 232, 240, 0.25)', // REVERTED HERE
-          }}
         >
           <ul className="py-1 max-h-full overflow-y-auto custom-scrollbar">
             {availableRoles.map((role) => (
               <li
                 key={role.value}
-                className="px-3 py-2 hover:bg-slate-400/20 cursor-pointer flex items-center text-xs transition-colors duration-150 ease-in-out" // Adjusted hover
+                className="px-3 py-2 hover:bg-white/15 rounded-md mx-1 my-0.5 cursor-pointer flex items-center text-xs transition-colors duration-150 ease-in-out" // Adjusted hover
                 onClick={() => handleSelectRole(role.value)}
               >
                 {isRoleActive(role.value) ? (
@@ -167,7 +177,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
                 ) : (
                   <span className="w-3.5 mr-2.5"></span>
                 )}
-                <span className={isRoleActive(role.value) ? 'font-semibold text-gray-900' : 'text-gray-700'}>
+                <span className={isRoleActive(role.value) ? 'font-semibold text-slate-800' : 'text-slate-800'}>
                   {role.label}
                 </span>
               </li>
@@ -177,20 +187,22 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
         {(availableRoles && availableRoles.length > 0) &&
           <div
-            className="my-1.5 h-px mx-2"
-            style={{backgroundColor: 'rgba(203, 213, 225, 0.5)'}} // slate-300 with opacity
+            className="my-1.5 h-px mx-2 bg-white/20" // Separator for transparent bg
           ></div>
         }
 
         <li
-          className="px-3 py-2 hover:bg-slate-400/10 cursor-pointer flex items-center transition-colors duration-150 ease-in-out" // Adjusted hover
+          className={cn(
+            "mx-1.5 rounded-lg cursor-pointer flex items-center transition-colors duration-150 ease-in-out",
+            "px-4 py-3",
+            "hover:bg-white/10" // Adjusted hover
+          )}
           onClick={handleLogoutClick}
         >
-          <LogOutIcon className="h-4 w-4 mr-2.5 text-gray-500" />
-          <span className="font-medium">Выйти</span>
+          <LogOutIcon className="h-4 w-4 mr-2.5 text-slate-700" />
+          <span className="font-medium text-sm text-slate-800">Выйти</span>
         </li>
       </ul>
-      {/* Corrected style jsx global block */}
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {
           width: 6px;
@@ -199,13 +211,15 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           background: transparent;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(0, 0, 0, 0.2);
+          background: rgba(0, 0, 0, 0.25);
           border-radius: 3px;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(0, 0, 0, 0.3);
+          background: rgba(0, 0, 0, 0.35);
         }
       `}</style>
     </div>
   );
+
+  return createPortal(menuContent, portalNode);
 };
