@@ -1,22 +1,24 @@
 // client/src/components/layout/sidebar.tsx
 
-// Simple throttle function
-function throttle<F extends (...args: any[]) => any>(func: F, waitFor: number) {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
+// throttle function using requestAnimationFrame
+function throttle<F extends (...args: any[]) => any>(func: F) {
+  let frameId: number | null = null;
   let lastArgs: Parameters<F> | null = null;
+
   const throttled = (...args: Parameters<F>) => {
     lastArgs = args;
-    if (timeout === null) {
-      timeout = setTimeout(() => {
+    if (frameId === null) {
+      frameId = requestAnimationFrame(() => {
         if (lastArgs) {
           func(...lastArgs);
           lastArgs = null;
         }
-        timeout = null;
-      }, waitFor);
+        frameId = null;
+      });
     }
   };
-  return throttled as (...args: Parameters<F>) => void; // Ensure it matches void return if func returns void
+
+  return throttled as (...args: Parameters<F>) => void;
 }
 
 import { Link, useLocation } from "wouter";
@@ -343,12 +345,13 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
   const throttledHandleMouseMove = useMemo(() => {
     return throttle((event: MouseEvent) => {
       latestMouseMoveHandlerRef.current(event);
-    }, 10); // New throttle limit is 10ms
+    }); // REMOVE , 10
   }, []); // Empty dependency array ensures this is created once
 
 
   const handleMouseUp = (event: MouseEvent) => { 
     const wasDragging = !!dragStartRef.current; // Capture before nulling
+
     // If auto-snap happened in handleMouseMove, dragStartRef.current would be null here.
     // So, shouldCallSnap would correctly be false.
     const shouldCallSnap = wasDragging && showMagnetHint && position;
