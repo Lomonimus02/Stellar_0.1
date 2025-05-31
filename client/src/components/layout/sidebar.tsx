@@ -52,11 +52,15 @@ import { cn } from "@/lib/utils";
 import { UserRoleEnum } from "@shared/schema";
 // import { RoleSwitcher } from "@/components/role-switcher"; // REMOVED
 import { TeacherClassesMenu } from "./teacher-classes-menu";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"; // Added useQuery, useMutation, useQueryClient
+import { apiRequest } from "@/lib/queryClient"; // If not already there, for mutations
+import { useToast } from "@/hooks/use-toast"; // For mutation feedback
 import { SchoolAdminScheduleMenu } from "./school-admin-schedule-menu";
 // useState, useEffect might be partially unneeded, will adjust if they become fully unused
 import { ReactNode, forwardRef, useState, useEffect, useRef, useMemo } from "react"; // Added useRef and useMemo
 import { useSettings } from "@/contexts/SettingsContext"; // Import useSettings
 import { MorphingIcon } from '@/components/ui/morphing-icon'; // Import actual MorphingIcon
+import { ContextMenu } from './context-menu'; // Adjust path if necessary
 
 // const RMB_SIDEBAR_CONTROL_LS_KEY = 'enableRmbSidebarControl'; // REMOVED
 
@@ -108,20 +112,154 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
   // Safeguard removed, Sidebar component now always attempts to render its state.
   // Visibility when RBM ON & closed is handled by its own rendering logic returning the MenuIcon stub.
 
+  interface UserRole {
+    id: number;
+    userId: number;
+    role: UserRoleEnum;
+    schoolId: number | null;
+    classId?: number | null;
+    isDefault?: boolean;
+    isActive?: boolean;
+  }
+
   const [location] = useLocation();
-  const { user } = useAuth();
+  const { user, logoutMutation } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { isRmbControlEnabled } = useSettings(); // Get RBM mode status from hook for internal logic
+
+  // Moved roleNames declaration here
+  const roleNames = {
+    [UserRoleEnum.SUPER_ADMIN]: "Супер-админ",
+    [UserRoleEnum.SCHOOL_ADMIN]: "Администратор школы",
+    [UserRoleEnum.TEACHER]: "Учитель",
+    [UserRoleEnum.CLASS_TEACHER]: "Классный руководитель",
+    [UserRoleEnum.STUDENT]: "Ученик",
+    [UserRoleEnum.PARENT]: "Родитель",
+    [UserRoleEnum.PRINCIPAL]: "Директор",
+    [UserRoleEnum.VICE_PRINCIPAL]: "Завуч"
+  };
+
   const dragStartRef = useRef<{ x: number; y: number; sidebarX: number; sidebarY: number } | null>(null);
   const [showMagnetHint, setShowMagnetHint] = useState<boolean>(false);
   const prevShowMagnetHintRef = useRef(showMagnetHint); // For logging changes
   const [isDragging, setIsDragging] = useState(false); // New state for dragging
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
+
+  const { data: userRoles, isLoading: isLoadingRoles } = useQuery<UserRole[]>({
+    queryKey: ['/api/my-roles'],
+    queryFn: async () => {
+      const res = await apiRequest('/api/my-roles', 'GET');
+      if (!res.ok) {
+        throw new Error('Failed to fetch roles');
+      }
+      return res.json();
+    },
+    enabled: !!user, // Only run if user is logged in
+  });
+
+  const switchRoleMutation = useMutation({
+    mutationFn: async (role: UserRoleEnum) => {
+      if (!user || !user.id) throw new Error("User not authenticated");
+      const res = await apiRequest("/api/switch-role", "POST", { role });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || "Failed to switch role");
+      }
+      return res.json(); // Expects updated user object
+    },
+    onSuccess: (updatedUser) => {
+      queryClient.setQueryData(["/api/user"], updatedUser); // Update user data in cache
+      queryClient.invalidateQueries({ queryKey: ["/api/my-roles"] }); // Re-fetch roles to update isActive status
+
+      // The useAuth hook's user data will update due to cache change,
+      // which should trigger re-renders where needed.
+      // We might also need to refetch user explicitly if useAuth doesn't auto-update activeRole correctly.
+      // For now, relying on queryClient.setQueryData and component re-render.
+
+      toast({
+        title: "Роль изменена",
+        description: `Вы переключились на роль: ${roleNames[updatedUser.activeRole as UserRoleEnum] || updatedUser.activeRole}`,
+      });
+      closeContextMenu(); // Close menu after successful switch
+      // Consider a page reload or redirect if necessary for full UI update, like in RoleSwitcher.tsx
+      // setTimeout(() => window.location.reload(), 300); // Or navigate to "/"
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Ошибка при смене роли",
+        description: error.message,
+        variant: "destructive",
+      });
+      closeContextMenu(); // Close menu even on error
+    },
+  });
+
+  const handleSelectRole = (role: UserRoleEnum) => {
+    if (user?.activeRole === role) {
+      console.log("Role already active.");
+      closeContextMenu();
+      return;
+    }
+    switchRoleMutation.mutate(role);
+  };
+
+  const handleLogout = () => {
+    logoutMutation.mutate(undefined, { // Pass undefined if no args needed, or options object
+      onSuccess: () => {
+        // Optional: any client-side cleanup after successful logout API call if not handled by useAuth
+        console.log("Logout successful, redirecting or updating UI might be handled by AuthProvider.");
+        closeContextMenu(); // Close the context menu after initiating logout
+      },
+      onError: (error) => {
+        // Optional: handle error specifically for logout initiated from sidebar
+        console.error("Logout failed from sidebar:", error);
+        closeContextMenu(); // Still close context menu
+      }
+    });
+  };
 
   const X_MAGNET_THRESHOLD = 50; // Pixels from left edge for magnet hint
   const SIDEBAR_EDGE_MARGIN = '1rem'; // Default margin, e.g., screenEdgePadding as a string
 
+  const availableRolesForMenu = useMemo(() => {
+    if (!userRoles) return [];
+    return userRoles.map(ur => ({
+      value: ur.role,
+      label: roleNames[ur.role] || ur.role, // Use existing roleNames map
+    }));
+  }, [userRoles, roleNames]); // roleNames should be stable or included if it can change
+
+  const currentRoleDisplayName = useMemo(() => {
+    if (isLoadingRoles) return "Загрузка...";
+    if (!user?.activeRole) return "Роль не выбрана";
+    return roleNames[user.activeRole] || user.activeRole;
+  }, [user, user?.activeRole, isLoadingRoles, roleNames]);
+
+
   useEffect(() => { // Update ref when showMagnetHint changes
     prevShowMagnetHintRef.current = showMagnetHint;
   }, [showMagnetHint]);
+
+  const handleUserMenuToggle = (event: React.MouseEvent) => {
+    // If menu is already open at this position, or for this target, consider closing it.
+    // For simplicity now, it will always try to open/re-position.
+    // Or, to toggle:
+    // if (contextMenuOpen) {
+    //   setContextMenuOpen(false);
+    // } else {
+    //   setContextMenuPosition({ x: event.clientX, y: event.clientY });
+    //   setContextMenuOpen(true);
+    // }
+    // For now, let's stick to open/re-position on click, close on outside click.
+    setContextMenuPosition({ x: event.clientX, y: event.clientY });
+    setContextMenuOpen(true);
+  };
+
+  const closeContextMenu = () => {
+    setContextMenuOpen(false);
+  };
 
   useEffect(() => {
     if (ref && typeof ref === 'object' && ref.current) {
@@ -192,18 +330,6 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
   const allowedItems = navItems.filter(item =>
     roleAccess[userRole]?.includes(item.id)
   );
-
-  // Role display names in Russian
-  const roleNames = {
-    [UserRoleEnum.SUPER_ADMIN]: "Супер-админ",
-    [UserRoleEnum.SCHOOL_ADMIN]: "Администратор школы",
-    [UserRoleEnum.TEACHER]: "Учитель",
-    [UserRoleEnum.CLASS_TEACHER]: "Классный руководитель",
-    [UserRoleEnum.STUDENT]: "Ученик",
-    [UserRoleEnum.PARENT]: "Родитель",
-    [UserRoleEnum.PRINCIPAL]: "Директор",
-    [UserRoleEnum.VICE_PRINCIPAL]: "Завуч"
-  };
 
   // const sidebarStyle: React.CSSProperties = {}; // REMOVED this duplicate declaration
   const sidebarNominalWidth = 256; // w-64
@@ -453,7 +579,10 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
             {/* Padding needs to account for the fixed MorphingIcon area if not overlaying */}
             <div className="pt-12"> {/* Placeholder padding-top to clear icon */}
               {/* User Info */}
-              <div className="p-4">
+              <div
+                className="p-4 cursor-pointer hover:bg-white/20 rounded-xl transition-colors duration-150 ease-in-out"
+                onClick={handleUserMenuToggle}
+              >
                 <div className="flex items-center">
                   <Avatar className="h-7 w-7 border-2 border-slate-600/50">
                     <AvatarFallback className="bg-primary text-white">
@@ -529,7 +658,10 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
               </>
             </div>
             {/* User Info */}
-            <div className="p-4">
+            <div
+              className="p-4 cursor-pointer hover:bg-white/20 rounded-xl transition-colors duration-150 ease-in-out"
+              onClick={handleUserMenuToggle}
+            >
               <div className="flex items-center">
                 <Avatar className="h-7 w-7 border-2 border-slate-600/50">
                   <AvatarFallback className="bg-primary text-white">
@@ -581,6 +713,15 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
           null
         )
       )}
+      <ContextMenu
+        isOpen={contextMenuOpen}
+        position={contextMenuPosition}
+        onClose={closeContextMenu}
+        currentRoleName={currentRoleDisplayName} // Updated
+        availableRoles={availableRolesForMenu} // Updated
+        onSelectRole={handleSelectRole} // Updated
+        onLogout={handleLogout} // Placeholder
+      />
     </aside>
   );
 });
