@@ -1,4 +1,24 @@
 // client/src/components/layout/sidebar.tsx
+
+// Simple throttle function
+function throttle<F extends (...args: any[]) => any>(func: F, waitFor: number) {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let lastArgs: Parameters<F> | null = null;
+  const throttled = (...args: Parameters<F>) => {
+    lastArgs = args;
+    if (timeout === null) {
+      timeout = setTimeout(() => {
+        if (lastArgs) {
+          func(...lastArgs);
+          lastArgs = null;
+        }
+        timeout = null;
+      }, waitFor);
+    }
+  };
+  return throttled as (...args: Parameters<F>) => void; // Ensure it matches void return if func returns void
+}
+
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -32,7 +52,7 @@ import { UserRoleEnum } from "@shared/schema";
 import { TeacherClassesMenu } from "./teacher-classes-menu";
 import { SchoolAdminScheduleMenu } from "./school-admin-schedule-menu";
 // useState, useEffect might be partially unneeded, will adjust if they become fully unused
-import { ReactNode, forwardRef, useState, useEffect, useRef } from "react"; // Added useRef
+import { ReactNode, forwardRef, useState, useEffect, useRef, useMemo } from "react"; // Added useRef and useMemo
 import { useSettings } from "@/contexts/SettingsContext"; // Import useSettings
 import { MorphingIcon } from '@/components/ui/morphing-icon'; // Import actual MorphingIcon
 
@@ -92,12 +112,35 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
   const dragStartRef = useRef<{ x: number; y: number; sidebarX: number; sidebarY: number } | null>(null);
   const [showMagnetHint, setShowMagnetHint] = useState<boolean>(false);
   const prevShowMagnetHintRef = useRef(showMagnetHint); // For logging changes
+  const [isDragging, setIsDragging] = useState(false); // New state for dragging
 
   const X_MAGNET_THRESHOLD = 50; // Pixels from left edge for magnet hint
+  const SIDEBAR_EDGE_MARGIN = '1rem'; // Default margin, e.g., screenEdgePadding as a string
 
   useEffect(() => { // Update ref when showMagnetHint changes
     prevShowMagnetHintRef.current = showMagnetHint;
   }, [showMagnetHint]);
+
+  useEffect(() => {
+    if (ref && typeof ref === 'object' && ref.current) {
+      if (position) {
+        ref.current.style.setProperty('--sidebar-x', `${position.x}px`);
+        ref.current.style.setProperty('--sidebar-y', `${position.y}px`);
+      } else {
+        // When position is null (e.g., magnetized or default state)
+        if (isMagnetizedToLeft) {
+          // If magnetized, explicitly set to edge values or remove to use CSS fallback to edge values
+          // Assuming magnetized means it's at the defined edge (e.g., 1rem)
+          ref.current.style.setProperty('--sidebar-x', SIDEBAR_EDGE_MARGIN);
+          ref.current.style.setProperty('--sidebar-y', SIDEBAR_EDGE_MARGIN); // Adjust if Y can vary when magnetized
+        } else {
+          // Generic null position, remove properties to let CSS fallbacks in sidebarStyle take over
+          ref.current.style.removeProperty('--sidebar-x');
+          ref.current.style.removeProperty('--sidebar-y');
+        }
+      }
+    }
+  }, [position, isMagnetizedToLeft, ref]);
 
   const handleNavLinkClick = () => {
     if (!isSidebarPinned && isOpen) {
@@ -160,38 +203,19 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
     [UserRoleEnum.VICE_PRINCIPAL]: "Завуч"
   };
 
-  const sidebarStyle: React.CSSProperties = {};
+  // const sidebarStyle: React.CSSProperties = {}; // REMOVED this duplicate declaration
   const sidebarNominalWidth = 256; // w-64
   const screenEdgePadding = 16; // 1rem, for keeping sidebar off the very edge
 
-  // Style decision:
-  // 1. If 'position' is provided, use it (applies to floating or pinned-at-custom-location).
-  // 2. If 'position' is null, use default pinned styles (top: 1rem, left: 1rem).
-  if (position) {
-    let newX = position.x;
-    let newY = position.y;
+  // Use CSS custom properties for top/left, with fallbacks.
+  // The actual values will be set via ref.current.style.setProperty()
+  const sidebarStyle: React.CSSProperties = { // This is the correct declaration to keep
+    top: `var(--sidebar-y, ${SIDEBAR_EDGE_MARGIN})`,
+    left: `var(--sidebar-x, ${SIDEBAR_EDGE_MARGIN})`,
+  };
 
-    // Boundary checks should only apply if the sidebar is NOT pinned OR if it's actively being dragged.
-    const shouldApplyBoundaryChecks = dragStartRef.current || !isSidebarPinned;
-
-    if (shouldApplyBoundaryChecks && typeof window !== 'undefined') { 
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-        const sidebarCurrentHeight = (ref && typeof ref === 'object' && ref.current)
-                                    ? ref.current.offsetHeight
-                                    : viewportHeight - 2 * screenEdgePadding; // Estimate
-
-        newX = Math.max(screenEdgePadding, Math.min(newX, viewportWidth - sidebarNominalWidth - screenEdgePadding));
-        newY = Math.max(screenEdgePadding, Math.min(newY, viewportHeight - sidebarCurrentHeight - screenEdgePadding));
-    }
-    
-    sidebarStyle.top = `${newY}px`; 
-    sidebarStyle.left = `${newX}px`;
-  } else {
-    // Default position (typically when pinned to the edge without a specific 'position' value)
-    sidebarStyle.top = '1rem'; 
-    sidebarStyle.left = '1rem'; 
-  }
+  // The old logic for directly setting sidebarStyle.top/left based on `position` prop is removed.
+  // It's now handled by the useEffect that sets CSS custom properties.
 
   const handleMouseDown = (e: React.MouseEvent<HTMLElement>) => {
     const isDraggable = isRmbControlEnabled && !isSidebarPinned && isOpen;
@@ -210,6 +234,7 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
         return;
     }
 
+    setIsDragging(true); // Set dragging state to true
     // Prevent text selection during drag
     document.body.style.userSelect = 'none';
 
@@ -222,12 +247,12 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
       sidebarY: sidebarRect?.top || position?.y || screenEdgePadding,
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mousemove', throttledHandleMouseMove); // MODIFIED
     document.addEventListener('mouseup', handleMouseUp);
     console.log('[Sidebar] MouseDown: Drag Started', { dragStartRefCurrent: dragStartRef.current });
   };
 
-  const handleMouseMove = (e: MouseEvent) => {
+  const handleMouseMoveCallback = (e: MouseEvent) => { // RENAMED from handleMouseMove
     if (!dragStartRef.current || !isOpen || isSidebarPinned) return;
 
     const deltaX = e.clientX - dragStartRef.current.x;
@@ -275,17 +300,23 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
       // Terminate current drag sequence as main-layout will now manage pinned state
       dragStartRef.current = null;
       document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mousemove', throttledHandleMouseMove); // MODIFIED
       document.removeEventListener('mouseup', handleMouseUp); // Also remove mouseup listener
       if (showMagnetHint) { // Reset hint if it was shown
         setShowMagnetHint(false);
         console.log('[Sidebar] MouseMove: Reset showMagnetHint to false due to auto-snap.');
       }
+      setIsDragging(false); // Reset dragging state on auto-snap
       return; // Stop further processing in this event
     }
 
     // If auto-snap didn't occur, continue with normal position update using CLAMPED values
-    setSidebarPosition({ x: clampedX, y: clampedY });
+    // Update CSS custom properties for smooth animation via CSS transitions
+    if (ref && typeof ref === 'object' && ref.current) {
+      ref.current.style.setProperty('--sidebar-x', `${clampedX}px`);
+      ref.current.style.setProperty('--sidebar-y', `${clampedY}px`);
+    }
+    setSidebarPosition({ x: clampedX, y: clampedY }); // Inform parent of logical position change
 
     // Magnet hint logic (still useful if snap-on-mouseup is kept or for visual cue before auto-snap threshold)
     let newHintState = false;
@@ -301,6 +332,20 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
       setShowMagnetHint(newHintState);
     }
   };
+
+  // Store the latest handleMouseMoveCallback in a ref
+  const latestMouseMoveHandlerRef = useRef(handleMouseMoveCallback);
+  useEffect(() => {
+    latestMouseMoveHandlerRef.current = handleMouseMoveCallback;
+  }, [handleMouseMoveCallback]);
+
+  // Create the throttled version of handleMouseMove
+  const throttledHandleMouseMove = useMemo(() => {
+    return throttle((event: MouseEvent) => {
+      latestMouseMoveHandlerRef.current(event);
+    }, 10); // New throttle limit is 10ms
+  }, []); // Empty dependency array ensures this is created once
+
 
   const handleMouseUp = (event: MouseEvent) => { 
     const wasDragging = !!dragStartRef.current; // Capture before nulling
@@ -321,13 +366,14 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
       handleRequestMagnetSnap(position!); // position is checked in shouldCallSnap
     }
     
+    setIsDragging(false); // Reset dragging state on mouse up
     dragStartRef.current = null;
     if (showMagnetHint) { 
       setShowMagnetHint(false); 
       console.log('[Sidebar] MouseUp: Reset showMagnetHint to false');
     }
     document.body.style.userSelect = ''; 
-    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('mousemove', throttledHandleMouseMove); // MODIFIED
     document.removeEventListener('mouseup', handleMouseUp);
   };
 
@@ -336,11 +382,11 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
     return () => {
       if (dragStartRef.current) { // If dragging was in progress
         document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mousemove', throttledHandleMouseMove); // MODIFIED
         document.removeEventListener('mouseup', handleMouseUp);
       }
     };
-  }, []); // Empty dependency array for unmount cleanup
+  }, [throttledHandleMouseMove]); // MODIFIED: Added throttledHandleMouseMove to dependency array
 
   return (
     <aside
@@ -351,12 +397,17 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
       onClick={!isOpen && isRmbControlEnabled ? requestClose : undefined}
       className={cn(
         "fixed z-40 rounded-3xl max-h-[calc(100vh-2rem)]",
-        "bg-transparent backdrop-blur-2xl shadow-lg border border-white/15",
-        "sidebar-glowing-effect", // Removed 'relative' here; 'fixed' already acts as positioning context
-        "transition-all duration-300 ease-in-out", // General transition for width, etc.
+
+        // backdrop-blur-2xl is now unconditional, only transitions change
+        isDragging
+          ? "transition-all duration-75 ease-linear"
+          : "transition-all duration-300 ease-in-out",
+
+        "backdrop-blur-2xl bg-transparent shadow-lg border border-white/15", // backdrop-blur-2xl and bg-transparent are now unconditional here
+        "sidebar-glowing-effect",
 
         // RBM OFF Mode specific overall container styles
-        !isRmbControlEnabled && (isOpen ? "w-64" : "w-12 h-12 p-0"), // RBM OFF: fixed small size for collapsed stub, no extra padding on aside itself
+        !isRmbControlEnabled && (isOpen ? "w-64" : "w-12 h-12 p-0"),
 
         // RBM ON Mode specific overall container styles
         isRmbControlEnabled && (
