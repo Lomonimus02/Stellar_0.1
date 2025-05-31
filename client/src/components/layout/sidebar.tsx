@@ -1,4 +1,26 @@
 // client/src/components/layout/sidebar.tsx
+
+// throttle function using requestAnimationFrame
+function throttle<F extends (...args: any[]) => any>(func: F) {
+  let frameId: number | null = null;
+  let lastArgs: Parameters<F> | null = null;
+
+  const throttled = (...args: Parameters<F>) => {
+    lastArgs = args;
+    if (frameId === null) {
+      frameId = requestAnimationFrame(() => {
+        if (lastArgs) {
+          func(...lastArgs);
+          lastArgs = null;
+        }
+        frameId = null;
+      });
+    }
+  };
+
+  return throttled as (...args: Parameters<F>) => void;
+}
+
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -21,15 +43,22 @@ import {
   ClipboardListIcon,
   PinIcon,
   PinOffIcon,
-  XIcon
+  MenuIcon // Added MenuIcon
+  // XIcon removed
 } from "lucide-react";
+import { BurgerIcon } from "@/components/ui"; // Import BurgerIcon
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { UserRoleEnum } from "@shared/schema";
 // import { RoleSwitcher } from "@/components/role-switcher"; // REMOVED
 import { TeacherClassesMenu } from "./teacher-classes-menu";
 import { SchoolAdminScheduleMenu } from "./school-admin-schedule-menu";
-import { ReactNode, forwardRef } from "react";
+// useState, useEffect might be partially unneeded, will adjust if they become fully unused
+import { ReactNode, forwardRef, useState, useEffect, useRef, useMemo } from "react"; // Added useRef and useMemo
+import { useSettings } from "@/contexts/SettingsContext"; // Import useSettings
+import { MorphingIcon } from '@/components/ui/morphing-icon'; // Import actual MorphingIcon
+
+// const RMB_SIDEBAR_CONTROL_LS_KEY = 'enableRmbSidebarControl'; // REMOVED
 
 interface LinkMenuItem {
   id: string;
@@ -48,17 +77,72 @@ type NavItem = LinkMenuItem | ComponentMenuItem;
 interface SidebarProps {
   isOpen: boolean;
   isSidebarPinned: boolean;
+  isMagnetizedToLeft: boolean; // New Prop
   toggleSidebarPin: () => void;
   requestClose: () => void;
-  setSidebarOpen: (isOpen: boolean) => void; // Added setSidebarOpen
-  position?: { x: number, y: number } | null; // New prop
-  isAnimatingPin?: boolean; // ADD this prop
+  setSidebarOpen: (isOpen: boolean) => void;
+  position?: { x: number, y: number } | null;
+  setSidebarPosition: (position: { x: number; y: number } | null) => void;
+  handleRequestMagnetSnap: (currentPosition: { x: number; y: number }) => void; // New Prop
+  isAnimatingPin?: boolean;
+  justUnpinnedFromMagnetized?: boolean; // For cool-down logic
+  onDragStartFromFloating?: () => void; // Callback to reset cool-down flag
 }
 
 export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
-  ({ isOpen, isSidebarPinned, toggleSidebarPin, requestClose, setSidebarOpen, position, isAnimatingPin }, ref) => {
+  ({ 
+    isOpen, 
+    isSidebarPinned, 
+    isMagnetizedToLeft, // Destructure
+    toggleSidebarPin, 
+    requestClose, 
+    setSidebarOpen, 
+    position, 
+    setSidebarPosition, 
+    handleRequestMagnetSnap, // Destructure
+    isAnimatingPin,
+    justUnpinnedFromMagnetized = false, // Default to false if not provided
+    onDragStartFromFloating
+  }, ref) => {
+  // const { isRmbControlEnabled } = useSettings(); // isRmbControlEnabled is now taken from props if needed, or direct from useSettings later
+  // Safeguard removed, Sidebar component now always attempts to render its state.
+  // Visibility when RBM ON & closed is handled by its own rendering logic returning the MenuIcon stub.
+
   const [location] = useLocation();
   const { user } = useAuth();
+  const { isRmbControlEnabled } = useSettings(); // Get RBM mode status from hook for internal logic
+  const dragStartRef = useRef<{ x: number; y: number; sidebarX: number; sidebarY: number } | null>(null);
+  const [showMagnetHint, setShowMagnetHint] = useState<boolean>(false);
+  const prevShowMagnetHintRef = useRef(showMagnetHint); // For logging changes
+  const [isDragging, setIsDragging] = useState(false); // New state for dragging
+
+  const X_MAGNET_THRESHOLD = 50; // Pixels from left edge for magnet hint
+  const SIDEBAR_EDGE_MARGIN = '1rem'; // Default margin, e.g., screenEdgePadding as a string
+
+  useEffect(() => { // Update ref when showMagnetHint changes
+    prevShowMagnetHintRef.current = showMagnetHint;
+  }, [showMagnetHint]);
+
+  useEffect(() => {
+    if (ref && typeof ref === 'object' && ref.current) {
+      if (position) {
+        ref.current.style.setProperty('--sidebar-x', `${position.x}px`);
+        ref.current.style.setProperty('--sidebar-y', `${position.y}px`);
+      } else {
+        // When position is null (e.g., magnetized or default state)
+        if (isMagnetizedToLeft) {
+          // If magnetized, explicitly set to edge values or remove to use CSS fallback to edge values
+          // Assuming magnetized means it's at the defined edge (e.g., 1rem)
+          ref.current.style.setProperty('--sidebar-x', SIDEBAR_EDGE_MARGIN);
+          ref.current.style.setProperty('--sidebar-y', SIDEBAR_EDGE_MARGIN); // Adjust if Y can vary when magnetized
+        } else {
+          // Generic null position, remove properties to let CSS fallbacks in sidebarStyle take over
+          ref.current.style.removeProperty('--sidebar-x');
+          ref.current.style.removeProperty('--sidebar-y');
+        }
+      }
+    }
+  }, [position, isMagnetizedToLeft, ref]);
 
   const handleNavLinkClick = () => {
     if (!isSidebarPinned && isOpen) {
@@ -121,130 +205,382 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
     [UserRoleEnum.VICE_PRINCIPAL]: "Завуч"
   };
 
-  const sidebarStyle: React.CSSProperties = {};
+  // const sidebarStyle: React.CSSProperties = {}; // REMOVED this duplicate declaration
   const sidebarNominalWidth = 256; // w-64
   const screenEdgePadding = 16; // 1rem, for keeping sidebar off the very edge
 
-  console.log('[Sidebar] Rendering. isOpen:', isOpen, 'isSidebarPinned:', isSidebarPinned, 'position:', position, 'isAnimatingPin:', isAnimatingPin);
+  // Use CSS custom properties for top/left, with fallbacks.
+  // The actual values will be set via ref.current.style.setProperty()
+  const sidebarStyle: React.CSSProperties = { // This is the correct declaration to keep
+    top: `var(--sidebar-y, ${SIDEBAR_EDGE_MARGIN})`,
+    left: `var(--sidebar-x, ${SIDEBAR_EDGE_MARGIN})`,
+  };
 
-  if (position && !isSidebarPinned) { // Condition changed: isOpen removed from here
-    let top = position.y;
-    let left = position.x;
+  // The old logic for directly setting sidebarStyle.top/left based on `position` prop is removed.
+  // It's now handled by the useEffect that sets CSS custom properties.
 
-    // Adjust if too close to the right edge
-    if (left + sidebarNominalWidth + screenEdgePadding > window.innerWidth) {
-      left = window.innerWidth - sidebarNominalWidth - screenEdgePadding;
+  const handleMouseDown = (e: React.MouseEvent<HTMLElement>) => {
+    const isDraggable = isRmbControlEnabled && !isSidebarPinned && isOpen;
+    // Example: console.log('[Sidebar] MouseDown: Draggable?', { rmb: isRmbControlEnabled, pinned: isSidebarPinned, open: isOpen });
+    console.log('[Sidebar] MouseDown: Draggable Check', { rmb: isRmbControlEnabled, pinned: isSidebarPinned, open: isOpen, isDraggable });
+
+    if (e.button !== 0 || !isDraggable) {
+      return;
     }
-    // Adjust if too close to the bottom edge
-    const sidebarCurrentHeight = (ref && typeof ref === 'object' && ref.current) 
-                                  ? ref.current.offsetHeight 
-                                  : (window.innerHeight - 2 * screenEdgePadding);
-    if (top + sidebarCurrentHeight + screenEdgePadding > window.innerHeight) {
-      top = window.innerHeight - sidebarCurrentHeight - screenEdgePadding;
+
+    // REMOVED: onDragStartFromFloating?.(); Call is now in handleMouseMove
+
+    // Prevent dragging if clicking on interactive elements like buttons or links
+    const targetElement = e.target as HTMLElement;
+    if (targetElement.closest('button, a')) {
+        return;
     }
 
-    // Ensure it's not off the top or left edge
-    sidebarStyle.top = Math.max(screenEdgePadding, top) + 'px';
-    sidebarStyle.left = Math.max(screenEdgePadding, left) + 'px';
-    console.log('[Sidebar] Style: DYNAMIC/UNPINNED. top:', sidebarStyle.top, 'left:', sidebarStyle.left, 'isOpen:', isOpen);
-  } else {
-    // Default position for pinned state or when not dynamically positioned
-    sidebarStyle.top = '1rem';
-    sidebarStyle.left = '1rem';
-    console.log('[Sidebar] Style: DEFAULT/PINNED. top: 1rem, left: 1rem, isOpen:', isOpen);
-  }
+    setIsDragging(true); // Set dragging state to true
+    // Prevent text selection during drag
+    document.body.style.userSelect = 'none';
+
+    const sidebarRect = (ref as React.RefObject<HTMLElement>)?.current?.getBoundingClientRect();
+    
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      sidebarX: sidebarRect?.left || position?.x || screenEdgePadding,
+      sidebarY: sidebarRect?.top || position?.y || screenEdgePadding,
+    };
+
+    document.addEventListener('mousemove', throttledHandleMouseMove); // MODIFIED
+    document.addEventListener('mouseup', handleMouseUp);
+    console.log('[Sidebar] MouseDown: Drag Started', { dragStartRefCurrent: dragStartRef.current });
+  };
+
+  const handleMouseMoveCallback = (e: MouseEvent) => { // RENAMED from handleMouseMove
+    if (!dragStartRef.current || !isOpen || isSidebarPinned) return;
+
+    const deltaX = e.clientX - dragStartRef.current.x;
+    const deltaY = e.clientY - dragStartRef.current.y;
+    let newX = dragStartRef.current.sidebarX + deltaX; // Potential new X (raw)
+    let newY = dragStartRef.current.sidebarY + deltaY; // Potential new Y (raw)
+
+    // Proactive boundary clamping
+    const sidebarCurrentHeight = (ref && typeof ref === 'object' && ref.current)
+                                ? ref.current.offsetHeight
+                                : window.innerHeight - 2 * screenEdgePadding; // Fallback like in style calculation
+
+    const clampedX = Math.max(
+      screenEdgePadding,
+      Math.min(newX, window.innerWidth - sidebarNominalWidth - screenEdgePadding)
+    );
+    const clampedY = Math.max(
+      screenEdgePadding,
+      Math.min(newY, window.innerHeight - sidebarCurrentHeight - screenEdgePadding)
+    );
+
+    // Cool-down reset logic: if the sidebar was just unpinned from a magnetized state,
+    // reset the cool-down flag if user drags it sufficiently away from the snap edge.
+    if (justUnpinnedFromMagnetized) {
+      const SNAP_RESET_BUFFER = 10; // Pixels to drag away from threshold to reset cool-down
+      // Use unclamped `newX` (raw user intent) for this check
+      if (newX > X_MAGNET_THRESHOLD + SNAP_RESET_BUFFER) {
+        console.log('[Sidebar] MouseMove: Dragged sufficiently away, resetting cool-down flag via callback.', { newX, threshold: X_MAGNET_THRESHOLD, buffer: SNAP_RESET_BUFFER });
+        onDragStartFromFloating?.(); // This will call setJustUnpinnedFromMagnetized(false) in parent
+        // Note: justUnpinnedFromMagnetized prop will update on next render.
+        // The auto-snap check below will still use the current prop value for this event.
+      }
+    }
+
+    // Automatic snap-to-edge logic during drag
+    // Use unclamped `newX` for the trigger condition to reflect user intent towards edge.
+    // And check justUnpinnedFromMagnetized status (prop value for current render).
+    if ( isRmbControlEnabled && isOpen && !isSidebarPinned && newX < X_MAGNET_THRESHOLD && !justUnpinnedFromMagnetized ) {
+      // (dragStartRef.current is implied by the function guard)
+      console.log('[Sidebar] MouseMove: Automatic snap condition met (cool-down is false).', { rawNewX: newX, rawNewY: newY, threshold: X_MAGNET_THRESHOLD, justUnpinnedFromMagnetized });
+      // Pass raw newX (that triggered snap) and clamped newY to handleRequestMagnetSnap.
+      // main-layout will override X to its fixed snap offset anyway.
+      handleRequestMagnetSnap({ x: newX, y: clampedY });
+
+      // Terminate current drag sequence as main-layout will now manage pinned state
+      dragStartRef.current = null;
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', throttledHandleMouseMove); // MODIFIED
+      document.removeEventListener('mouseup', handleMouseUp); // Also remove mouseup listener
+      if (showMagnetHint) { // Reset hint if it was shown
+        setShowMagnetHint(false);
+        console.log('[Sidebar] MouseMove: Reset showMagnetHint to false due to auto-snap.');
+      }
+      setIsDragging(false); // Reset dragging state on auto-snap
+      return; // Stop further processing in this event
+    }
+
+    // If auto-snap didn't occur, continue with normal position update using CLAMPED values
+    // Update CSS custom properties for smooth animation via CSS transitions
+    if (ref && typeof ref === 'object' && ref.current) {
+      ref.current.style.setProperty('--sidebar-x', `${clampedX}px`);
+      ref.current.style.setProperty('--sidebar-y', `${clampedY}px`);
+    }
+    setSidebarPosition({ x: clampedX, y: clampedY }); // Inform parent of logical position change
+
+    // Magnet hint logic (still useful if snap-on-mouseup is kept or for visual cue before auto-snap threshold)
+    let newHintState = false;
+    const canShowHint = isRmbControlEnabled && !isSidebarPinned; // isSidebarPinned might have changed if snap occurred, but we returned
+    if (canShowHint) {
+      // Use e.clientX for hint, as newX is the sidebar's desired top-left, not cursor position
+      if (e.clientX < X_MAGNET_THRESHOLD) {
+        newHintState = true;
+      }
+    }
+    if (prevShowMagnetHintRef.current !== newHintState) {
+      console.log('[Sidebar] MouseMove: Hint Check (post-autosnap check)', { clientX: e.clientX, threshold: X_MAGNET_THRESHOLD, newHintState: newHintState, oldHintState: prevShowMagnetHintRef.current, pinnedCheck: isSidebarPinned, rmbEnabledCheck: isRmbControlEnabled });
+      setShowMagnetHint(newHintState);
+    }
+  };
+
+  // Store the latest handleMouseMoveCallback in a ref
+  const latestMouseMoveHandlerRef = useRef(handleMouseMoveCallback);
+  useEffect(() => {
+    latestMouseMoveHandlerRef.current = handleMouseMoveCallback;
+  }, [handleMouseMoveCallback]);
+
+  // Create the throttled version of handleMouseMove
+  const throttledHandleMouseMove = useMemo(() => {
+    return throttle((event: MouseEvent) => {
+      latestMouseMoveHandlerRef.current(event);
+    }); // REMOVE , 10
+  }, []); // Empty dependency array ensures this is created once
+
+
+  const handleMouseUp = (event: MouseEvent) => { 
+    const wasDragging = !!dragStartRef.current; // Capture before nulling
+
+    // If auto-snap happened in handleMouseMove, dragStartRef.current would be null here.
+    // So, shouldCallSnap would correctly be false.
+    const shouldCallSnap = wasDragging && showMagnetHint && position;
+    
+    // Example: console.log('[Sidebar] MouseUp: Magnet Snap Call Check', { wasDragging: !!dragStartRef.current, hint: showMagnetHint, position: position, shouldCallSnap: /* boolean result of condition */ });
+    console.log('[Sidebar] MouseUp: Magnet Snap Call Check', { 
+      wasDraggingAtStartOfMouseUp: wasDragging, 
+      currentShowMagnetHint: showMagnetHint, 
+      currentPositionProp: position, 
+      shouldCallSnapLogic: shouldCallSnap 
+    });
+
+    if (shouldCallSnap) {
+      console.log('[Sidebar] MouseUp: Calling handleRequestMagnetSnap', { position });
+      handleRequestMagnetSnap(position!); // position is checked in shouldCallSnap
+    }
+    
+    setIsDragging(false); // Reset dragging state on mouse up
+    dragStartRef.current = null;
+    if (showMagnetHint) { 
+      setShowMagnetHint(false); 
+      console.log('[Sidebar] MouseUp: Reset showMagnetHint to false');
+    }
+    document.body.style.userSelect = ''; 
+    document.removeEventListener('mousemove', throttledHandleMouseMove); // MODIFIED
+    document.removeEventListener('mouseup', handleMouseUp);
+  };
+
+  // Cleanup global listeners when component unmounts or relevant conditions change
+  useEffect(() => {
+    return () => {
+      if (dragStartRef.current) { // If dragging was in progress
+        document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', throttledHandleMouseMove); // MODIFIED
+        document.removeEventListener('mouseup', handleMouseUp);
+      }
+    };
+  }, [throttledHandleMouseMove]); // MODIFIED: Added throttledHandleMouseMove to dependency array
 
   return (
     <aside
       ref={ref}
+      // MouseDown for dragging is conditional on isOpen AND RBM mode (implicitly, as only RBM ON allows drag)
+      onMouseDown={isRmbControlEnabled && isOpen ? handleMouseDown : undefined}
+      // Click on collapsed stub: only for RBM ON (MenuIcon). RBM OFF MorphingIcon handles its own click.
+      onClick={!isOpen && isRmbControlEnabled ? requestClose : undefined}
       className={cn(
-        "fixed z-40 w-64 rounded-3xl max-h-[calc(100vh-2rem)]", // top-4, left-4 REMOVED
-        "bg-transparent backdrop-blur-2xl shadow-lg border border-white/15", // MODIFIED: bg-white/10 to bg-transparent
-        "overflow-y-auto sidebar overflow-hidden sidebar-glowing-effect", // `relative` removed, Scrolling, identifiers, effects
-        isAnimatingPin ? "transition-all duration-300 ease-in-out" : "transition-[opacity,transform] duration-300 ease-in-out", // CONDITIONAL TRANSITION
-        isOpen ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none" // Animation classes changed
+        "fixed z-40 rounded-3xl max-h-[calc(100vh-2rem)]",
+
+        // backdrop-blur-2xl is now unconditional, only transitions change
+        isDragging
+          ? "transition-all duration-75 ease-linear"
+          : "transition-all duration-300 ease-in-out",
+
+        "backdrop-blur-2xl bg-transparent shadow-lg border border-white/15", // backdrop-blur-2xl and bg-transparent are now unconditional here
+        "sidebar-glowing-effect",
+
+        // RBM OFF Mode specific overall container styles
+        !isRmbControlEnabled && (isOpen ? "w-64" : "w-12 h-12 p-0"),
+
+        // RBM ON Mode specific overall container styles
+        isRmbControlEnabled && (
+          isOpen
+            ? ["w-64 overflow-y-auto", // RBM ON Open
+                (!isSidebarPinned && !dragStartRef.current) ? "cursor-grab" : "",
+                dragStartRef.current ? "cursor-grabbing" : "",
+                (console.log('[Sidebar] Render: Hint Class Check', { hint: showMagnetHint, pinned: isSidebarPinned }), showMagnetHint && !isSidebarPinned ? "outline outline-2 outline-offset-2 outline-blue-500 shadow-2xl" : "")
+              ]
+            : "w-16 p-3 flex items-center justify-center cursor-pointer overflow-hidden" // RBM ON Collapsed (MenuIcon stub)
+        ),
+        // New conditional visibility logic:
+        !isRmbControlEnabled
+          ? "opacity-100 scale-100 pointer-events-auto" // RBM OFF: always visible
+          : (isOpen
+              ? "opacity-100 scale-100 pointer-events-auto" // RBM ON & Open: visible
+              : "opacity-0 scale-95 pointer-events-none" // RBM ON & Closed: hidden for animation
+            )
       )}
-      style={sidebarStyle} // ADDED style attribute
+      style={sidebarStyle}
     >
-      {/* Sidebar Header: Pin and Close buttons */}
-      <div className="flex items-center justify-between p-3"> {/* Removed border-b border-slate-700/50 */}
-        <button
-          onClick={toggleSidebarPin}
-          className="p-1 text-gray-700 hover:text-gray-900 hover:bg-black/5 rounded-md transition-colors" // MODIFIED: p-1.5 to p-1
-          aria-label={isSidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
-        >
-          {isSidebarPinned ? (
-            <PinOffIcon className="h-4 w-4" />
-          ) : (
-            <PinIcon className="h-4 w-4" />
-          )}
-        </button>
-        <button
-          onClick={requestClose}
-          className="p-1 text-gray-700 hover:text-gray-900 hover:bg-black/5 rounded-md transition-colors" // MODIFIED: p-1.5 to p-1
-          aria-label="Close sidebar"
-        >
-          <XIcon className="h-4 w-4" />
-        </button>
-      </div>
-
-      {/* User Info */}
-      <div className="p-4"> {/* Removed border-b and border-slate-700/50 */}
-        <div className="flex items-center">
-          <Avatar className="h-7 w-7 border-2 border-slate-600/50"> {/* Avatar border color adjusted */}
-            <AvatarFallback className="bg-primary text-white">
-              {user?.firstName?.[0]}{user?.lastName?.[0]}
-            </AvatarFallback>
-          </Avatar>
-          <div className="ml-3">
-            <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
-            {/* User role display removed */}
-          </div>
-        </div>
-
-        {/* Переключатель ролей - отображается только для пользователей с несколькими ролями */}
-        {/* <div className="mt-3"> */}
-        {/*   <RoleSwitcher /> */}
-        {/* </div> */}
-        {/* Pin Button was here, now moved to the header */}
-      </div>
-
-      {/* Navigation */}
-      <nav className="py-2 px-2"> {/* MODIFIED: py-4 to py-2 */}
-        <div className="space-y-1">
-          {allowedItems.map((item) => {
-            // Если у пункта есть компонент, отображаем его
-            if ('component' in item) {
-              return <div key={item.id}>{item.component}</div>;
-            }
-
-            // Иначе отображаем обычный пункт меню со ссылкой
-            const linkItem = item as LinkMenuItem;
-            const isActive = location === linkItem.href ||
-                            (linkItem.href !== "/" && location.startsWith(linkItem.href));
-
-            return (
-              <Link key={linkItem.id} href={linkItem.href} onClick={handleNavLinkClick}>
-                <div className={cn(
-                  "group flex items-center px-2 py-1.5 text-sm font-medium rounded-full transition-[color,background-color,border-color,text-decoration-color,fill,stroke,box-shadow] duration-300 ease-in-out", // MODIFIED: py-2 to py-1.5
-                  isActive
-                    ? "bg-white/20 backdrop-blur-md shadow-md text-[rgb(2,191,122)] border border-white/30" // MODIFIED active state style
-                    : "text-gray-800 hover:bg-black/5 hover:text-gray-900" // Inactive state specific
-                )}>
-                  <span className={cn(
-                    isActive
-                      ? "text-[rgb(2,191,122)]" // Active icon color
-                      : "text-gray-600 group-hover:text-[rgb(2,191,122)] transition-colors" // Default icon color: darker, green on hover
-                  )}>
-                    {linkItem.icon}
-                  </span>
-                  {linkItem.label}
+      {!isRmbControlEnabled ? (
+        // RBM OFF Mode: MorphingIcon is fixed, content panel animates
+        <>
+          <MorphingIcon
+            isExpanded={isOpen}
+            onClick={requestClose}
+            className="h-7 w-7 text-gray-700 absolute top-2.5 left-2.5 z-10" // Standardized icon position slightly from p-2
+          />
+          <div
+            className={cn(
+              "w-full h-full overflow-y-auto", // Base structural classes
+              "transition-all duration-300 ease-in-out", // Animation base for opacity and transform
+              isOpen
+                ? "opacity-100 translate-x-0"
+                : "opacity-0 -translate-x-full pointer-events-none" // Slide out and become non-interactive
+            )}
+          >
+            {/* Content Panel: User Info and Nav. No separate header div for RBM OFF expanded. */}
+            {/* Padding needs to account for the fixed MorphingIcon area if not overlaying */}
+            <div className="pt-12"> {/* Placeholder padding-top to clear icon */}
+              {/* User Info */}
+              <div className="p-4">
+                <div className="flex items-center">
+                  <Avatar className="h-7 w-7 border-2 border-slate-600/50">
+                    <AvatarFallback className="bg-primary text-white">
+                      {user?.firstName?.[0]}{user?.lastName?.[0]}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="ml-3">
+                    <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
+                  </div>
                 </div>
-              </Link>
-            );
-          })}
-        </div>
-      </nav>
+              </div>
+              {/* Navigation */}
+              <nav className="py-2 px-2">
+                <div className="space-y-1">
+                  {allowedItems.map((item) => {
+                    if ('component' in item) {
+                      return <div key={item.id}>{item.component}</div>;
+                    }
+                    const linkItem = item as LinkMenuItem;
+                    const isActive = location === linkItem.href ||
+                                    (linkItem.href !== "/" && location.startsWith(linkItem.href));
+                    return (
+                      <Link key={linkItem.id} href={linkItem.href} onClick={handleNavLinkClick}>
+                        <div className={cn(
+                          "group flex items-center px-2 py-1.5 text-sm font-medium rounded-full transition-[color,background-color,border-color,text-decoration-color,fill,stroke,box-shadow] duration-300 ease-in-out",
+                          isActive
+                            ? "bg-white/20 backdrop-blur-md shadow-md text-[rgb(2,191,122)] border border-white/30"
+                            : "text-gray-800 hover:bg-black/5 hover:text-gray-900"
+                        )}>
+                          <span className={cn(
+                            isActive
+                              ? "text-[rgb(2,191,122)]"
+                              : "text-gray-600 group-hover:text-[rgb(2,191,122)] transition-colors"
+                          )}>
+                            {linkItem.icon}
+                          </span>
+                          {linkItem.label}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </nav>
+            </div>
+          </div>
+        </>
+      ) : (
+        // RBM ON Mode: Existing logic for open/collapsed states
+        isOpen ? (
+          <>
+            {/* Sidebar Header: Pin and Close buttons OR Toggle button */}
+            <div className={cn(
+              "flex items-center p-3",
+              "justify-between" // RBM ON is always justify-between
+            )}>
+              <>
+                <button
+                  onClick={toggleSidebarPin}
+                  className="p-1 text-gray-700 hover:text-gray-900 hover:bg-black/5 rounded-md transition-colors"
+                  aria-label={isSidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
+                >
+                  {isSidebarPinned ? (
+                    <PinOffIcon className="h-4 w-4" />
+                  ) : (
+                    <PinIcon className="h-4 w-4" />
+                  )}
+                </button>
+                <BurgerIcon
+                  isOpen={true} // Always an X for RMB enabled mode
+                  onClick={requestClose}
+                  className="text-gray-700 p-1 h-7 w-7 hover:bg-black/5 rounded-md transition-colors flex items-center justify-center"
+                />
+              </>
+            </div>
+            {/* User Info */}
+            <div className="p-4">
+              <div className="flex items-center">
+                <Avatar className="h-7 w-7 border-2 border-slate-600/50">
+                  <AvatarFallback className="bg-primary text-white">
+                    {user?.firstName?.[0]}{user?.lastName?.[0]}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Navigation */}
+            <nav className="py-2 px-2">
+              <div className="space-y-1">
+                {allowedItems.map((item) => {
+                  if ('component' in item) {
+                    return <div key={item.id}>{item.component}</div>;
+                  }
+                  const linkItem = item as LinkMenuItem;
+                  const isActive = location === linkItem.href ||
+                                  (linkItem.href !== "/" && location.startsWith(linkItem.href));
+                  return (
+                    <Link key={linkItem.id} href={linkItem.href} onClick={handleNavLinkClick}>
+                      <div className={cn(
+                        "group flex items-center px-2 py-1.5 text-sm font-medium rounded-full transition-[color,background-color,border-color,text-decoration-color,fill,stroke,box-shadow] duration-300 ease-in-out",
+                        isActive
+                          ? "bg-white/20 backdrop-blur-md shadow-md text-[rgb(2,191,122)] border border-white/30"
+                          : "text-gray-800 hover:bg-black/5 hover:text-gray-900"
+                      )}>
+                        <span className={cn(
+                          isActive
+                            ? "text-[rgb(2,191,122)]"
+                            : "text-gray-600 group-hover:text-[rgb(2,191,122)] transition-colors"
+                        )}>
+                          {linkItem.icon}
+                        </span>
+                        {linkItem.label}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </nav>
+          </>
+        ) : (
+          // RBM ON Mode, Collapsed View Content: Render nothing inside.
+          // The aside element itself is styled as a stub but hidden by opacity/scale.
+          null
+        )
+      )}
     </aside>
   );
 });

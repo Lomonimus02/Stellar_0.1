@@ -35,6 +35,7 @@ import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider } from "./hooks/use-auth";
 // Импортируем новую страницу
 import SubjectsManagementPage from "./pages/subjects-management";
+import { SettingsProvider } from "@/contexts/SettingsContext"; // Import SettingsProvider
 
 function Router() {
   return (
@@ -76,10 +77,12 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <Router />
-        <Toaster />
-      </AuthProvider>
+      <SettingsProvider> {/* Wrap AuthProvider */}
+        <AuthProvider>
+          <Router />
+          <Toaster />
+        </AuthProvider>
+      </SettingsProvider>
     </QueryClientProvider>
   );
 }

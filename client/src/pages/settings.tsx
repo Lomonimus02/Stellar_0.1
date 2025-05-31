@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState } from "react"; // Removed useEffect, as it's no longer used locally for RMB toggle
 import { MainLayout } from "@/components/layout/main-layout";
 import { useAuth } from "@/hooks/use-auth";
 import { UserRoleEnum, User } from "@shared/schema";
@@ -44,6 +44,8 @@ import {
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { Label } from "@/components/ui/label"; // Added Label import
+import { useSettings } from "@/contexts/SettingsContext"; // Import useSettings
 
 // Schema for profile update
 const profileFormSchema = z.object({
@@ -78,6 +80,10 @@ export default function SettingsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("profile");
+  
+  const { isRmbControlEnabled, setIsRmbControlEnabled } = useSettings(); // Use context
+
+  // Removed local state and effect for RMB control
   
   // Profile form
   const profileForm = useForm<z.infer<typeof profileFormSchema>>({
@@ -351,6 +357,28 @@ export default function SettingsPage() {
                     </Button>
                   </form>
                 </Form>
+
+                <Separator className="my-6" /> 
+
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium">Настройки интерфейса</h3>
+                  <div className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="rbm-sidebar-toggle" className="text-base">
+                        Управление сайдбаром по ПКМ
+                      </Label>
+                      <p className="text-sm text-muted-foreground">
+                        Включить/отключить открытие сайдбара правой кнопкой мыши. При включении этой опции, сайдбар будет открываться по ПКМ (поверх контента), и будет доступна функция его закрепления. При отключении, управление сайдбаром осуществляется только через иконку-бургер (с автоматической адаптацией контента), а функция явного закрепления будет недоступна.
+                      </p>
+                    </div>
+                    <Switch
+                      id="rbm-sidebar-toggle"
+                      checked={isRmbControlEnabled}
+                      onCheckedChange={setIsRmbControlEnabled}
+                      aria-label="Toggle RMB sidebar control"
+                    />
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
