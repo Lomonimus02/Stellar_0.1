@@ -98,10 +98,10 @@ export function MainLayout({ children, className }: MainLayoutProps) {
       const valueToStore = isSidebarPinned && sidebarOpen;
       // SIDEBAR_PINNED_LS_KEY now tracks if the sidebar was open AND pinned (either magnetized or custom)
       localStorage.setItem(SIDEBAR_PINNED_LS_KEY, JSON.stringify(valueToStore));
-      console.log('[MainLayout] Persisted Pinned State (SIDEBAR_PINNED_LS_KEY):', { 
-        isSidebarPinned, 
-        sidebarOpen, 
-        storedValue: valueToStore 
+      console.log('[MainLayout] Persisted Pinned State (SIDEBAR_PINNED_LS_KEY):', {
+        isSidebarPinned,
+        sidebarOpen,
+        storedValue: valueToStore
       });
     }
   }, [isSidebarPinned, sidebarOpen]);
@@ -171,9 +171,20 @@ export function MainLayout({ children, className }: MainLayoutProps) {
     setIsMagnetizedToLeft(false); // Pinning action always results in a custom pin or float, not auto-magnetized.
 
     if (!newPinState && wasMagnetizedBeforeToggle) { // If UNPINNING from a magnetized state
+      setSidebarPosition({ x: LEFT_EDGE_OFFSET, y: LEFT_EDGE_OFFSET }); // Set to default top-left to float from there
       setJustUnpinnedFromMagnetized(true);
-      console.log('[MainLayout] toggleSidebarPin: Unpinned from magnetized state, setting cool-down.');
+      console.log('[MainLayout] toggleSidebarPin: Unpinned from magnetized state, setting position and cool-down.');
     } else if (newPinState) { // If PINNING action (creating a custom pin)
+      // If pinning and current position state is null (e.g., it was magnetized or default positioned from RBM toggle),
+      // capture its current visual position from the ref to pin it there.
+      // This is crucial for RBM ON mode when pinning a sidebar that was opened to default (null position).
+      if (sidebarPosition === null && sidebarRef.current) {
+        const rect = sidebarRef.current.getBoundingClientRect();
+        setSidebarPosition({ x: rect.left, y: rect.top });
+        console.log('[MainLayout] toggleSidebarPin: Pinning at current visual rect', { x: rect.left, y: rect.top });
+      }
+      // If sidebarPosition already exists (i.e., it was floating and dragged), it will pin at that existing state value.
+
       setJustUnpinnedFromMagnetized(false); // Clear cool-down, as this is a new deliberate state
       console.log('[MainLayout] toggleSidebarPin: Pinning action, clearing cool-down.');
     }
@@ -326,6 +337,7 @@ export function MainLayout({ children, className }: MainLayoutProps) {
   return (
     <div className="w-full h-screen"> 
       {/* Global BurgerIcon REMOVED */}
+      {/* Sidebar is now always rendered; its internal logic handles visibility/state */}
       <Sidebar 
         isOpen={sidebarOpen} 
         ref={sidebarRef} 

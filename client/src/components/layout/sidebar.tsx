@@ -82,9 +82,13 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
     justUnpinnedFromMagnetized = false, // Default to false if not provided
     onDragStartFromFloating
   }, ref) => {
+  // const { isRmbControlEnabled } = useSettings(); // isRmbControlEnabled is now taken from props if needed, or direct from useSettings later
+  // Safeguard removed, Sidebar component now always attempts to render its state.
+  // Visibility when RBM ON & closed is handled by its own rendering logic returning the MenuIcon stub.
+
   const [location] = useLocation();
   const { user } = useAuth();
-  const { isRmbControlEnabled } = useSettings(); 
+  const { isRmbControlEnabled } = useSettings(); // Get RBM mode status from hook for internal logic
   const dragStartRef = useRef<{ x: number; y: number; sidebarX: number; sidebarY: number } | null>(null);
   const [showMagnetHint, setShowMagnetHint] = useState<boolean>(false);
   const prevShowMagnetHintRef = useRef(showMagnetHint); // For logging changes
@@ -197,7 +201,7 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
     if (e.button !== 0 || !isDraggable) {
       return;
     }
-    
+
     // REMOVED: onDragStartFromFloating?.(); Call is now in handleMouseMove
 
     // Prevent dragging if clicking on interactive elements like buttons or links
@@ -341,42 +345,117 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
   return (
     <aside
       ref={ref}
-      onMouseDown={isOpen ? handleMouseDown : undefined}
+      // MouseDown for dragging is conditional on isOpen AND RBM mode (implicitly, as only RBM ON allows drag)
+      onMouseDown={isRmbControlEnabled && isOpen ? handleMouseDown : undefined}
       // Click on collapsed stub: only for RBM ON (MenuIcon). RBM OFF MorphingIcon handles its own click.
-      onClick={!isOpen && isRmbControlEnabled ? requestClose : undefined} 
+      onClick={!isOpen && isRmbControlEnabled ? requestClose : undefined}
       className={cn(
         "fixed z-40 rounded-3xl max-h-[calc(100vh-2rem)]",
         "bg-transparent backdrop-blur-2xl shadow-lg border border-white/15",
-        "sidebar-glowing-effect", // Common base style
-        // Transitions: Apply a general transition, specific transitions for drag/pin can be reviewed later if needed
-        "transition-all duration-300 ease-in-out", 
-        // Conditional styles based on isOpen
-        isOpen 
-          ? [
-              "w-64 opacity-100 scale-100 pointer-events-auto overflow-y-auto",
-              (!isSidebarPinned && isRmbControlEnabled && !dragStartRef.current) ? "cursor-grab" : "", 
-              dragStartRef.current ? "cursor-grabbing" : "",
-              (console.log('[Sidebar] Render: Hint Class Check', { hint: showMagnetHint, pinned: isSidebarPinned }), showMagnetHint && !isSidebarPinned ? "outline outline-2 outline-offset-2 outline-blue-500 shadow-2xl" : "")
-            ]
-          : [ // Collapsed state classes
-              "flex items-center justify-center cursor-pointer opacity-100 scale-100 pointer-events-auto overflow-hidden",
-              isRmbControlEnabled 
-                ? "w-16 p-3" // RBM ON: Larger collapsed stub
-                : "w-12 p-2"  // RBM OFF: Smaller collapsed stub
-            ]
+        "sidebar-glowing-effect", // Removed 'relative' here; 'fixed' already acts as positioning context
+        "transition-all duration-300 ease-in-out", // General transition for width, etc.
+
+        // RBM OFF Mode specific overall container styles
+        !isRmbControlEnabled && (isOpen ? "w-64" : "w-12 h-12 p-0"), // RBM OFF: fixed small size for collapsed stub, no extra padding on aside itself
+
+        // RBM ON Mode specific overall container styles
+        isRmbControlEnabled && (
+          isOpen
+            ? ["w-64 overflow-y-auto", // RBM ON Open
+                (!isSidebarPinned && !dragStartRef.current) ? "cursor-grab" : "",
+                dragStartRef.current ? "cursor-grabbing" : "",
+                (console.log('[Sidebar] Render: Hint Class Check', { hint: showMagnetHint, pinned: isSidebarPinned }), showMagnetHint && !isSidebarPinned ? "outline outline-2 outline-offset-2 outline-blue-500 shadow-2xl" : "")
+              ]
+            : "w-16 p-3 flex items-center justify-center cursor-pointer overflow-hidden" // RBM ON Collapsed (MenuIcon stub)
+        ),
+        // New conditional visibility logic:
+        !isRmbControlEnabled
+          ? "opacity-100 scale-100 pointer-events-auto" // RBM OFF: always visible
+          : (isOpen
+              ? "opacity-100 scale-100 pointer-events-auto" // RBM ON & Open: visible
+              : "opacity-0 scale-95 pointer-events-none" // RBM ON & Closed: hidden for animation
+            )
       )}
       style={sidebarStyle}
     >
-      {isOpen ? (
+      {!isRmbControlEnabled ? (
+        // RBM OFF Mode: MorphingIcon is fixed, content panel animates
         <>
-          {/* Sidebar Header: Pin and Close buttons OR Toggle button */}
-          <div className={cn(
-            "flex items-center p-3", // p-3 is applied here for expanded header
-            isRmbControlEnabled ? "justify-between" : "justify-start" // Changed justify-end to justify-start for RBM OFF
-          )}>
-            {isRmbControlEnabled ? (
+          <MorphingIcon
+            isExpanded={isOpen}
+            onClick={requestClose}
+            className="h-7 w-7 text-gray-700 absolute top-2.5 left-2.5 z-10" // Standardized icon position slightly from p-2
+          />
+          <div
+            className={cn(
+              "w-full h-full overflow-y-auto", // Base structural classes
+              "transition-all duration-300 ease-in-out", // Animation base for opacity and transform
+              isOpen
+                ? "opacity-100 translate-x-0"
+                : "opacity-0 -translate-x-full pointer-events-none" // Slide out and become non-interactive
+            )}
+          >
+            {/* Content Panel: User Info and Nav. No separate header div for RBM OFF expanded. */}
+            {/* Padding needs to account for the fixed MorphingIcon area if not overlaying */}
+            <div className="pt-12"> {/* Placeholder padding-top to clear icon */}
+              {/* User Info */}
+              <div className="p-4">
+                <div className="flex items-center">
+                  <Avatar className="h-7 w-7 border-2 border-slate-600/50">
+                    <AvatarFallback className="bg-primary text-white">
+                      {user?.firstName?.[0]}{user?.lastName?.[0]}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="ml-3">
+                    <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
+                  </div>
+                </div>
+              </div>
+              {/* Navigation */}
+              <nav className="py-2 px-2">
+                <div className="space-y-1">
+                  {allowedItems.map((item) => {
+                    if ('component' in item) {
+                      return <div key={item.id}>{item.component}</div>;
+                    }
+                    const linkItem = item as LinkMenuItem;
+                    const isActive = location === linkItem.href ||
+                                    (linkItem.href !== "/" && location.startsWith(linkItem.href));
+                    return (
+                      <Link key={linkItem.id} href={linkItem.href} onClick={handleNavLinkClick}>
+                        <div className={cn(
+                          "group flex items-center px-2 py-1.5 text-sm font-medium rounded-full transition-[color,background-color,border-color,text-decoration-color,fill,stroke,box-shadow] duration-300 ease-in-out",
+                          isActive
+                            ? "bg-white/20 backdrop-blur-md shadow-md text-[rgb(2,191,122)] border border-white/30"
+                            : "text-gray-800 hover:bg-black/5 hover:text-gray-900"
+                        )}>
+                          <span className={cn(
+                            isActive
+                              ? "text-[rgb(2,191,122)]"
+                              : "text-gray-600 group-hover:text-[rgb(2,191,122)] transition-colors"
+                          )}>
+                            {linkItem.icon}
+                          </span>
+                          {linkItem.label}
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </nav>
+            </div>
+          </div>
+        </>
+      ) : (
+        // RBM ON Mode: Existing logic for open/collapsed states
+        isOpen ? (
+          <>
+            {/* Sidebar Header: Pin and Close buttons OR Toggle button */}
+            <div className={cn(
+              "flex items-center p-3",
+              "justify-between" // RBM ON is always justify-between
+            )}>
               <>
-                {/* Pin button - visible only if RMB control is enabled */}
                 <button
                   onClick={toggleSidebarPin}
                   className="p-1 text-gray-700 hover:text-gray-900 hover:bg-black/5 rounded-md transition-colors"
@@ -388,71 +467,65 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
                     <PinIcon className="h-4 w-4" />
                   )}
                 </button>
-                {/* Close ('X') button - visible only if RMB control is enabled */}
                 <BurgerIcon
-                  isOpen={true} // Always an X for RMB enabled mode, as sidebar is open
-                  onClick={requestClose} // requestClose will just close it
+                  isOpen={true} // Always an X for RMB enabled mode
+                  onClick={requestClose}
                   className="text-gray-700 p-1 h-7 w-7 hover:bg-black/5 rounded-md transition-colors flex items-center justify-center"
                 />
               </>
-            ) : (
-              <>
-                <MorphingIcon isExpanded={true} onClick={requestClose} className="h-7 w-7 text-gray-700" />
-              </>
-            )}
-          </div>
-          {/* User Info */}
-          <div className="p-4"> {/* Removed border-b and border-slate-700/50 */}
-            <div className="flex items-center">
-              <Avatar className="h-7 w-7 border-2 border-slate-600/50">
-                <AvatarFallback className="bg-primary text-white">
-                  {user?.firstName?.[0]}{user?.lastName?.[0]}
-                </AvatarFallback>
-              </Avatar>
-              <div className="ml-3">
-                <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
+            </div>
+            {/* User Info */}
+            <div className="p-4">
+              <div className="flex items-center">
+                <Avatar className="h-7 w-7 border-2 border-slate-600/50">
+                  <AvatarFallback className="bg-primary text-white">
+                    {user?.firstName?.[0]}{user?.lastName?.[0]}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Navigation */}
-          <nav className="py-2 px-2">
-            <div className="space-y-1">
-              {allowedItems.map((item) => {
-                if ('component' in item) {
-                  return <div key={item.id}>{item.component}</div>;
-                }
-                const linkItem = item as LinkMenuItem;
-                const isActive = location === linkItem.href ||
-                                (linkItem.href !== "/" && location.startsWith(linkItem.href));
-                return (
-                  <Link key={linkItem.id} href={linkItem.href} onClick={handleNavLinkClick}>
-                    <div className={cn(
-                      "group flex items-center px-2 py-1.5 text-sm font-medium rounded-full transition-[color,background-color,border-color,text-decoration-color,fill,stroke,box-shadow] duration-300 ease-in-out",
-                      isActive
-                        ? "bg-white/20 backdrop-blur-md shadow-md text-[rgb(2,191,122)] border border-white/30"
-                        : "text-gray-800 hover:bg-black/5 hover:text-gray-900"
-                    )}>
-                      <span className={cn(
+            {/* Navigation */}
+            <nav className="py-2 px-2">
+              <div className="space-y-1">
+                {allowedItems.map((item) => {
+                  if ('component' in item) {
+                    return <div key={item.id}>{item.component}</div>;
+                  }
+                  const linkItem = item as LinkMenuItem;
+                  const isActive = location === linkItem.href ||
+                                  (linkItem.href !== "/" && location.startsWith(linkItem.href));
+                  return (
+                    <Link key={linkItem.id} href={linkItem.href} onClick={handleNavLinkClick}>
+                      <div className={cn(
+                        "group flex items-center px-2 py-1.5 text-sm font-medium rounded-full transition-[color,background-color,border-color,text-decoration-color,fill,stroke,box-shadow] duration-300 ease-in-out",
                         isActive
-                          ? "text-[rgb(2,191,122)]"
-                          : "text-gray-600 group-hover:text-[rgb(2,191,122)] transition-colors"
+                          ? "bg-white/20 backdrop-blur-md shadow-md text-[rgb(2,191,122)] border border-white/30"
+                          : "text-gray-800 hover:bg-black/5 hover:text-gray-900"
                       )}>
-                        {linkItem.icon}
-                      </span>
-                      {linkItem.label}
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </nav>
-        </>
-      ) : (
-        // Collapsed View Content
-        !isRmbControlEnabled 
-          ? <MorphingIcon isExpanded={false} onClick={requestClose} className="h-7 w-7 text-gray-700" /> 
-          : <MenuIcon className="h-7 w-7 text-gray-700" />
+                        <span className={cn(
+                          isActive
+                            ? "text-[rgb(2,191,122)]"
+                            : "text-gray-600 group-hover:text-[rgb(2,191,122)] transition-colors"
+                        )}>
+                          {linkItem.icon}
+                        </span>
+                        {linkItem.label}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </nav>
+          </>
+        ) : (
+          // RBM ON Mode, Collapsed View Content: Render nothing inside.
+          // The aside element itself is styled as a stub but hidden by opacity/scale.
+          null
+        )
       )}
     </aside>
   );
