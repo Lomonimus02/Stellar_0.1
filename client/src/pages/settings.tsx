@@ -315,7 +315,7 @@ export default function SettingsPage() {
                             <FormLabel>Email</FormLabel>
                             <FormControl>
                               <div className="flex items-center">
-                                <Mail className="h-4 w-4 text-gray-500 mr-2" />
+                                <Mail className="h-4 w-4 text-[hsl(var(--input-placeholder-color))] mr-2" />
                                 <Input placeholder="your-email@example.com" {...field} />
                               </div>
                             </FormControl>
@@ -335,7 +335,7 @@ export default function SettingsPage() {
                             <FormLabel>Телефон</FormLabel>
                             <FormControl>
                               <div className="flex items-center">
-                                <Phone className="h-4 w-4 text-gray-500 mr-2" />
+                                <Phone className="h-4 w-4 text-[hsl(var(--input-placeholder-color))] mr-2" />
                                 <Input placeholder="+7 (___) ___-__-__" {...field} />
                               </div>
                             </FormControl>
@@ -403,7 +403,7 @@ export default function SettingsPage() {
                           <FormLabel>Текущий пароль</FormLabel>
                           <FormControl>
                             <div className="flex items-center">
-                              <Lock className="h-4 w-4 text-gray-500 mr-2" />
+                              <Lock className="h-4 w-4 text-[hsl(var(--input-placeholder-color))] mr-2" />
                               <Input type="password" placeholder="••••••••" {...field} />
                             </div>
                           </FormControl>
@@ -421,7 +421,7 @@ export default function SettingsPage() {
                             <FormLabel>Новый пароль</FormLabel>
                             <FormControl>
                               <div className="flex items-center">
-                                <Lock className="h-4 w-4 text-gray-500 mr-2" />
+                                <Lock className="h-4 w-4 text-[hsl(var(--input-placeholder-color))] mr-2" />
                                 <Input type="password" placeholder="••••••••" {...field} />
                               </div>
                             </FormControl>
@@ -441,7 +441,7 @@ export default function SettingsPage() {
                             <FormLabel>Подтверждение пароля</FormLabel>
                             <FormControl>
                               <div className="flex items-center">
-                                <Lock className="h-4 w-4 text-gray-500 mr-2" />
+                                <Lock className="h-4 w-4 text-[hsl(var(--input-placeholder-color))] mr-2" />
                                 <Input type="password" placeholder="••••••••" {...field} />
                               </div>
                             </FormControl>
