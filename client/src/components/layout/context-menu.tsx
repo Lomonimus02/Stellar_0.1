@@ -129,34 +129,34 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       style={{
         top: position.y,
         left: position.x,
-        minWidth: '200px',
+        minWidth: '240px',
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      <ul className="py-1.5">
+      <ul className="py-2">
         {(availableRoles && availableRoles.length > 0) && (
         <li
           className={cn(
-            "mx-1.5 rounded-lg cursor-pointer flex justify-between items-center transition-colors duration-150 ease-in-out",
-            "px-4 py-3",
+            "mx-2 rounded-xl cursor-pointer flex justify-between items-center transition-colors duration-150 ease-in-out",
+            "px-5 py-[14px]",
             "hover:bg-white/10", // Adjusted hover for bg-transparent: very light white hover
             availableRoles.length <= 1 ? 'opacity-70 cursor-default' : ''
           )}
           onClick={handleRoleItemClick}
         >
           <div className="flex items-center">
-            <UsersIcon className="h-4 w-4 mr-2.5 text-slate-700" />
-            <span className="font-medium text-sm text-slate-800">{currentRoleName || "Роль не определена"}</span>
+            <UsersIcon className="h-5 w-5 mr-3 text-slate-700" />
+            <span className="font-medium text-base text-slate-800">{currentRoleName || "Роль не определена"}</span>
           </div>
           {availableRoles.length > 1 && (
-            <ChevronDownIcon className={`h-4 w-4 text-slate-600 transition-transform duration-200 ${showRoleDropdown ? 'rotate-180' : ''}`} />
+            <ChevronDownIcon className={`h-5 w-5 text-slate-600 transition-transform duration-200 ${showRoleDropdown ? 'rotate-180' : ''}`} />
           )}
         </li>
         )}
 
         <div
           className={cn(
-            "mt-1 mx-1.5 rounded-lg", // Main rounding
+            "mt-1 mx-2 rounded-xl", // Main rounding
             "transition-all duration-300 ease-in-out overflow-hidden",
             // Nested dropdown also gets transparent bg, but maybe slightly different border/shadow for hierarchy
             "border-white/10", // Subtler border for nested
@@ -169,15 +169,18 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
             {availableRoles.map((role) => (
               <li
                 key={role.value}
-                className="px-3 py-2 hover:bg-white/15 rounded-md mx-1 my-0.5 cursor-pointer flex items-center text-xs transition-colors duration-150 ease-in-out" // Adjusted hover
+                className="px-4 py-[10px] hover:bg-white/15 rounded-lg mx-1.5 my-1 cursor-pointer flex items-center transition-colors duration-150 ease-in-out" // Adjusted hover
                 onClick={() => handleSelectRole(role.value)}
               >
                 {isRoleActive(role.value) ? (
-                  <CheckIcon className="h-3.5 w-3.5 mr-2.5 text-blue-600" />
+                  <CheckIcon className="h-4 w-4 mr-3 text-blue-600" />
                 ) : (
-                  <span className="w-3.5 mr-2.5"></span>
+                  <span className="w-4 mr-3"></span>
                 )}
-                <span className={isRoleActive(role.value) ? 'font-semibold text-slate-800' : 'text-slate-800'}>
+                <span className={cn(
+                  "text-sm",
+                  isRoleActive(role.value) ? 'font-semibold text-slate-800' : 'text-slate-800'
+                )}>
                   {role.label}
                 </span>
               </li>
@@ -187,20 +190,20 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
         {(availableRoles && availableRoles.length > 0) &&
           <div
-            className="my-1.5 h-px mx-2 bg-white/20" // Separator for transparent bg
+            className="my-2 h-px mx-2.5 bg-white/20" // Separator for transparent bg
           ></div>
         }
 
         <li
           className={cn(
-            "mx-1.5 rounded-lg cursor-pointer flex items-center transition-colors duration-150 ease-in-out",
-            "px-4 py-3",
+            "mx-2 rounded-xl cursor-pointer flex items-center transition-colors duration-150 ease-in-out",
+            "px-5 py-[14px]",
             "hover:bg-white/10" // Adjusted hover
           )}
           onClick={handleLogoutClick}
         >
-          <LogOutIcon className="h-4 w-4 mr-2.5 text-slate-700" />
-          <span className="font-medium text-sm text-slate-800">Выйти</span>
+          <LogOutIcon className="h-5 w-5 mr-3 text-slate-700" />
+          <span className="font-medium text-base text-slate-800">Выйти</span>
         </li>
       </ul>
       <style jsx global>{`

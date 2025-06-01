@@ -360,7 +360,7 @@ export function MainLayout({ children, className }: MainLayoutProps) {
           "pr-4 pb-4", 
           "transition-all duration-300 ease-in-out", 
           // Content adaptation logic: if magnetized to left and open, apply padding.
-          (console.log('[MainLayout] Render: Content Adapt Check', { magnetized: isMagnetizedToLeft, open: sidebarOpen }), isMagnetizedToLeft && sidebarOpen ? "md:pl-[288px] pl-6" : "md:pl-20 pl-6")
+          (console.log('[MainLayout] Render: Content Adapt Check', { magnetized: isMagnetizedToLeft, open: sidebarOpen }), isMagnetizedToLeft && sidebarOpen ? "sm:pl-[296px] md:pl-[304px] lg:pl-[324px] pl-6" : "md:pl-20 pl-6")
         )}
       >
         <main 

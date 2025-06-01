@@ -202,7 +202,7 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
     });
   };
 
-  const X_MAGNET_THRESHOLD = 50;
+  const X_MAGNET_THRESHOLD = 60;
   const SIDEBAR_EDGE_MARGIN = '1rem';
 
   const availableRolesForMenu = useMemo(() => {
@@ -276,25 +276,25 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
   };
 
   const navItems: NavItem[] = [
-    { id: "dashboard", label: "Главная", icon: <HomeIcon className="h-4 w-4 mr-3" />, href: "/" },
-    { id: "class-teacher-dashboard", label: "Панель классного руководителя", icon: <UsersIcon className="h-4 w-4 mr-3" />, href: "/class-teacher-dashboard" },
+    { id: "dashboard", label: "Главная", icon: <HomeIcon className="h-[22px] w-[22px] mr-4" />, href: "/" },
+    { id: "class-teacher-dashboard", label: "Панель классного руководителя", icon: <UsersIcon className="h-[22px] w-[22px] mr-4" />, href: "/class-teacher-dashboard" },
     { id: "teacher-classes-menu", component: <TeacherClassesMenu /> },
     { id: "school-admin-schedule-menu", component: <SchoolAdminScheduleMenu /> },
-    { id: "schools", label: "Школы", icon: <BuildingIcon className="h-4 w-4 mr-3" />, href: "/schools" },
-    { id: "users", label: "Пользователи", icon: <Users2Icon className="h-4 w-4 mr-3" />, href: "/users" },
-    { id: "user-roles", label: "Роли пользователей", icon: <UserCogIcon className="h-4 w-4 mr-3" />, href: "/user-roles" },
-    { id: "subjects-management", label: "Предметы", icon: <NotebookPenIcon className="h-4 w-4 mr-3" />, href: "/subjects-management" },
-    { id: "subgroups", label: "Подгруппы", icon: <UserPlusIcon className="h-4 w-4 mr-3" />, href: "/subgroups" },
-    { id: "schedule", label: "Расписание", icon: <CalendarIcon className="h-4 w-4 mr-3" />, href: "/schedule" },
-    { id: "grades", label: "Оценки", icon: <GraduationCapIcon className="h-4 w-4 mr-3" />, href: "/grades" },
-    { id: "grading-systems", label: "Системы оценивания", icon: <ClipboardListIcon className="h-4 w-4 mr-3" />, href: "/grading-systems" },
-    { id: "homework", label: "Домашние задания", icon: <BookIcon className="h-4 w-4 mr-3" />, href: "/homework" },
-    { id: "messages", label: "Сообщения", icon: <MessagesSquareIcon className="h-4 w-4 mr-3" />, href: "/messages" },
-    { id: "documents", label: "Документы", icon: <FolderIcon className="h-4 w-4 mr-3" />, href: "/documents" },
-    { id: "analytics", label: "Аналитика", icon: <BarChartIcon className="h-4 w-4 mr-3" />, href: "/analytics" },
-    { id: "notifications", label: "Уведомления", icon: <BellIcon className="h-4 w-4 mr-3" />, href: "/notifications" },
-    { id: "settings", label: "Настройки", icon: <SettingsIcon className="h-4 w-4 mr-3" />, href: "/settings" },
-    { id: "support", label: "Поддержка", icon: <HelpCircleIcon className="h-4 w-4 mr-3" />, href: "/support" }
+    { id: "schools", label: "Школы", icon: <BuildingIcon className="h-[22px] w-[22px] mr-4" />, href: "/schools" },
+    { id: "users", label: "Пользователи", icon: <Users2Icon className="h-[22px] w-[22px] mr-4" />, href: "/users" },
+    { id: "user-roles", label: "Роли пользователей", icon: <UserCogIcon className="h-[22px] w-[22px] mr-4" />, href: "/user-roles" },
+    { id: "subjects-management", label: "Предметы", icon: <NotebookPenIcon className="h-[22px] w-[22px] mr-4" />, href: "/subjects-management" },
+    { id: "subgroups", label: "Подгруппы", icon: <UserPlusIcon className="h-[22px] w-[22px] mr-4" />, href: "/subgroups" },
+    { id: "schedule", label: "Расписание", icon: <CalendarIcon className="h-[22px] w-[22px] mr-4" />, href: "/schedule" },
+    { id: "grades", label: "Оценки", icon: <GraduationCapIcon className="h-[22px] w-[22px] mr-4" />, href: "/grades" },
+    { id: "grading-systems", label: "Системы оценивания", icon: <ClipboardListIcon className="h-[22px] w-[22px] mr-4" />, href: "/grading-systems" },
+    { id: "homework", label: "Домашние задания", icon: <BookIcon className="h-[22px] w-[22px] mr-4" />, href: "/homework" },
+    { id: "messages", label: "Сообщения", icon: <MessagesSquareIcon className="h-[22px] w-[22px] mr-4" />, href: "/messages" },
+    { id: "documents", label: "Документы", icon: <FolderIcon className="h-[22px] w-[22px] mr-4" />, href: "/documents" },
+    { id: "analytics", label: "Аналитика", icon: <BarChartIcon className="h-[22px] w-[22px] mr-4" />, href: "/analytics" },
+    { id: "notifications", label: "Уведомления", icon: <BellIcon className="h-[22px] w-[22px] mr-4" />, href: "/notifications" },
+    { id: "settings", label: "Настройки", icon: <SettingsIcon className="h-[22px] w-[22px] mr-4" />, href: "/settings" },
+    { id: "support", label: "Поддержка", icon: <HelpCircleIcon className="h-[22px] w-[22px] mr-4" />, href: "/support" }
   ];
 
   const userRole = user?.activeRole || user?.role || UserRoleEnum.STUDENT;
@@ -302,7 +302,7 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
     roleAccess[userRole]?.includes(item.id)
   );
 
-  const sidebarNominalWidth = 256;
+  const sidebarNominalWidth = 308;
   const screenEdgePadding = 16;
 
   const sidebarStyle: React.CSSProperties = {
@@ -468,15 +468,15 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
           : "transition-all duration-300 ease-in-out",
         "backdrop-blur-2xl bg-transparent shadow-lg border border-white/15",
         "sidebar-glowing-effect",
-        !isRmbControlEnabled && (isOpen ? "w-64" : "w-12 h-12 p-0"),
+        !isRmbControlEnabled && (isOpen ? "w-full sm:w-70 md:w-72 lg:w-[308px]" : "w-14 h-14 p-0"),
         isRmbControlEnabled && (
           isOpen
-            ? ["w-64 overflow-y-auto",
+            ? ["w-full sm:w-70 md:w-72 lg:w-[308px] overflow-y-auto",
                 (!isSidebarPinned && !dragStartRef.current) ? "cursor-grab" : "",
                 dragStartRef.current ? "cursor-grabbing" : "",
                 (showMagnetHint && !isSidebarPinned ? "outline outline-2 outline-offset-2 outline-blue-500 shadow-2xl" : "")
               ]
-            : "w-16 p-3 flex items-center justify-center cursor-pointer overflow-hidden"
+            : "w-14 p-3 flex items-center justify-center cursor-pointer overflow-hidden"
         ),
         !isRmbControlEnabled
           ? "opacity-100 scale-100 pointer-events-auto"
@@ -493,7 +493,7 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
           <MorphingIcon
             isExpanded={isOpen}
             onClick={requestClose}
-            className="h-7 w-7 text-gray-700 absolute top-2.5 left-2.5 z-10"
+            className="h-10 w-10 text-gray-700 absolute top-3 left-3 z-10"
           />
           <div
             className={cn(
@@ -504,24 +504,24 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
                 : "opacity-0 -translate-x-full pointer-events-none"
             )}
           >
-            <div className="pt-12">
+            <div className="pt-14">
               <div
-                className="p-4 cursor-pointer hover:bg-white/20 rounded-xl transition-colors duration-150 ease-in-out"
+                className="p-5 cursor-pointer hover:bg-white/20 rounded-2xl transition-colors duration-150 ease-in-out"
                 onClick={handleUserMenuToggle}
               >
                 <div className="flex items-center">
-                  <Avatar className="h-7 w-7 border-2 border-slate-600/50">
+                  <Avatar className="h-10 w-10 border-2 border-slate-600/50">
                     <AvatarFallback className="bg-primary text-white">
                       {user?.firstName?.[0]}{user?.lastName?.[0]}
                     </AvatarFallback>
                   </Avatar>
                   <div className="ml-3">
-                    <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
+                    <p className="text-xl font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
                   </div>
                 </div>
               </div>
-              <nav className="py-2 px-2">
-                <div className="space-y-1">
+              <nav className="px-2 py-[10px]">
+                <div className="space-y-[5px]">
                   {allowedItems.map((item) => {
                     if ('component' in item) {
                       return <div key={item.id}>{item.component}</div>;
@@ -532,7 +532,7 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
                     return (
                       <Link key={linkItem.id} href={linkItem.href} onClick={handleNavLinkClick}>
                         <div className={cn(
-                          "group flex items-center px-2 py-1.5 text-sm font-medium rounded-full transition-[color,background-color,border-color,text-decoration-color,fill,stroke,box-shadow] duration-300 ease-in-out",
+                          "group flex items-center px-2 py-2 text-xl font-medium rounded-full transition-[color,background-color,border-color,text-decoration-color,fill,stroke,box-shadow] duration-300 ease-in-out",
                           isActive
                             ? "bg-white/20 backdrop-blur-md shadow-md text-[rgb(2,191,122)] border border-white/30"
                             : "text-gray-800 hover:bg-black/5 hover:text-gray-900"
@@ -558,7 +558,7 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
         isOpen ? (
           <>
             <div className={cn(
-              "flex items-center p-3",
+              "flex items-center p-[14px]",
               "justify-between"
             )}>
               <>
@@ -568,36 +568,36 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
                   aria-label={isSidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
                 >
                   {isSidebarPinned ? (
-                    <PinOffIcon className="h-4 w-4" />
+                    <PinOffIcon className="h-[22px] w-[22px]" />
                   ) : (
-                    <PinIcon className="h-4 w-4" />
+                    <PinIcon className="h-[22px] w-[22px]" />
                   )}
                 </button>
                 <BurgerIcon
                   isOpen={true}
                   onClick={requestClose}
-                  className="text-gray-700 p-1 h-7 w-7 hover:bg-black/5 rounded-md transition-colors flex items-center justify-center"
+                  className="text-gray-700 p-1 h-10 w-10 hover:bg-black/5 rounded-md transition-colors flex items-center justify-center"
                 />
               </>
             </div>
             <div
-              className="p-4 cursor-pointer hover:bg-white/20 rounded-xl transition-colors duration-150 ease-in-out"
+              className="p-5 cursor-pointer hover:bg-white/20 rounded-2xl transition-colors duration-150 ease-in-out"
               onClick={handleUserMenuToggle}
             >
               <div className="flex items-center">
-                <Avatar className="h-7 w-7 border-2 border-slate-600/50">
+                <Avatar className="h-10 w-10 border-2 border-slate-600/50">
                   <AvatarFallback className="bg-primary text-white">
                     {user?.firstName?.[0]}{user?.lastName?.[0]}
                   </AvatarFallback>
                 </Avatar>
                 <div className="ml-3">
-                  <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
+                  <p className="text-xl font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
                 </div>
               </div>
             </div>
 
-            <nav className="py-2 px-2">
-              <div className="space-y-1">
+            <nav className="px-2 py-[10px]">
+              <div className="space-y-[5px]">
                 {allowedItems.map((item) => {
                   if ('component' in item) {
                     return <div key={item.id}>{item.component}</div>;
@@ -608,7 +608,7 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(
                   return (
                     <Link key={linkItem.id} href={linkItem.href} onClick={handleNavLinkClick}>
                       <div className={cn(
-                        "group flex items-center px-2 py-1.5 text-sm font-medium rounded-full transition-[color,background-color,border-color,text-decoration-color,fill,stroke,box-shadow] duration-300 ease-in-out",
+                          "group flex items-center px-2 py-2 text-xl font-medium rounded-full transition-[color,background-color,border-color,text-decoration-color,fill,stroke,box-shadow] duration-300 ease-in-out",
                         isActive
                           ? "bg-white/20 backdrop-blur-md shadow-md text-[rgb(2,191,122)] border border-white/30"
                           : "text-gray-800 hover:bg-black/5 hover:text-gray-900"
