@@ -296,7 +296,10 @@ export default function HomeworkPage() {
 
   // Filter homework based on selected filters and search query
   const filteredHomework = homework.filter(hw => {
-    const classMatches = selectedClassId === "all" || hw.classId === selectedClassId;
+    let classMatches = selectedClassId === "all" || hw.classId === selectedClassId;
+    if (user?.role === UserRoleEnum.STUDENT) {
+      classMatches = true;
+    }
     const subjectMatches = selectedSubjectId === "all" || hw.subjectId === selectedSubjectId;
     const searchMatches = !searchQuery || 
       hw.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -356,25 +359,27 @@ export default function HomeworkPage() {
           />
         </div>
 
-        <Select
-          value={selectedClassId.toString()}
-          onValueChange={(value) => setSelectedClassId(value === "all" ? "all" : parseInt(value))}
-        >
-          <SelectTrigger>
-            <div className="flex items-center">
-              <Filter className="h-4 w-4 mr-2" />
-              <SelectValue placeholder="Все классы" />
-            </div>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все классы</SelectItem>
-            {classes.map((cls) => (
-              <SelectItem key={cls.id} value={cls.id.toString()}>
-                {cls.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {user?.role !== UserRoleEnum.STUDENT && (
+          <Select
+            value={selectedClassId.toString()}
+            onValueChange={(value) => setSelectedClassId(value === "all" ? "all" : parseInt(value))}
+          >
+            <SelectTrigger>
+              <div className="flex items-center">
+                <Filter className="h-4 w-4 mr-2" />
+                <SelectValue placeholder="Все классы" />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все классы</SelectItem>
+              {classes.map((cls) => (
+                <SelectItem key={cls.id} value={cls.id.toString()}>
+                  {cls.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
         <Select
           value={selectedSubjectId.toString()}

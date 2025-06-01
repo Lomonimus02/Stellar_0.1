@@ -389,6 +389,53 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(homework).where(inArray(homework.classId, classIds));
   }
 
+  async getHomeworkForStudentAdvanced(studentId: number): Promise<Homework[]> {
+    const studentClassesResult = await this.getStudentClasses(studentId);
+    if (!studentClassesResult || studentClassesResult.length === 0) {
+      return [];
+    }
+    const classIds = studentClassesResult.map(c => c.id);
+
+    const studentSubgroupsResult = await this.getStudentSubgroups(studentId);
+    const subgroupIds = studentSubgroupsResult.map(sg => sg.id);
+
+    let homeworkList: Homework[] = [];
+
+    // Fetch homework directly assigned to the student's classes
+    if (classIds.length > 0) {
+      const classHomework = await db.select().from(homework).where(inArray(homework.classId, classIds));
+      homeworkList.push(...classHomework);
+    }
+
+    // Fetch schedules relevant to the student's subgroups and classes
+    let scheduleIdsFromSubgroups: number[] = [];
+    if (subgroupIds.length > 0 && classIds.length > 0) {
+      const relevantSchedules = await db.select().from(schedules).where(
+        and(
+          inArray(schedules.subgroupId, subgroupIds),
+          inArray(schedules.classId, classIds)
+        )
+      );
+      scheduleIdsFromSubgroups = relevantSchedules.map(s => s.id);
+    }
+
+    // Fetch homework assigned via these schedules
+    if (scheduleIdsFromSubgroups.length > 0) {
+      const scheduleHomework = await db.select().from(homework).where(inArray(homework.scheduleId, scheduleIdsFromSubgroups));
+      homeworkList.push(...scheduleHomework);
+    }
+
+    // Ensure uniqueness of the combined homework list
+    const uniqueHomeworkMap = new Map<number, Homework>();
+    for (const hw of homeworkList) {
+      if (hw && hw.id !== undefined && !uniqueHomeworkMap.has(hw.id)) {
+        uniqueHomeworkMap.set(hw.id, hw);
+      }
+    }
+
+    return Array.from(uniqueHomeworkMap.values());
+  }
+
   async createHomework(homeworkData: InsertHomework): Promise<Homework> {
     const [newHomework] = await db.insert(homework).values(homeworkData).returning();
     return newHomework;

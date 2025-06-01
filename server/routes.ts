@@ -1624,7 +1624,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } else if (req.user.role === UserRoleEnum.TEACHER) {
       homework = await dataStorage.getHomeworkByTeacher(req.user.id);
     } else if (req.user.role === UserRoleEnum.STUDENT) {
-      homework = await dataStorage.getHomeworkByStudent(req.user.id);
+      homework = await dataStorage.getHomeworkForStudentAdvanced(req.user.id);
     }
     
     // Decrypt teacher info if embedded
