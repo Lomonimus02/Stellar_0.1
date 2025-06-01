@@ -12,6 +12,16 @@
     --input-placeholder-color: hsl(210 10% 65%); /* Lighter grey for input placeholders */
     --input-ring-color: rgb(2, 191, 122); /* Primary green for focus ring */
     --input-shadow: 0 1px 2px 0 hsla(0, 0%, 0%, 0.05); /* Subtle shadow for inputs */
+
+    /* Schedule Section Styles */
+    --schedule-background-color: hsla(0, 0%, 100%, 0.7);
+    --schedule-card-background-color: hsla(0, 0%, 100%, 0.6);
+    --schedule-text-color-primary: hsl(210, 10%, 25%);
+    --schedule-text-color-secondary: hsl(210, 10%, 55%);
+    --schedule-accent-color: rgb(2, 191, 122);
+    --schedule-border-radius: 16px;
+    --schedule-shadow: 0 8px 16px 0 hsla(0, 0%, 0%, 0.1);
+    --schedule-border-color: hsla(0, 0%, 100%, 0.2);
   }
 
   * {
@@ -36,6 +46,19 @@
     height: 100% !important;
     overflow: hidden !important;
   }
+}
+
+.schedule-visionOS-theme {
+  background-color: var(--schedule-background-color);
+  color: var(--schedule-text-color-primary);
+  /* backdrop-filter: blur(10px); Example: Apply blur if needed, ensure this doesn't conflict with other blurs */
+  border: 1px solid var(--schedule-border-color);
+  border-radius: var(--schedule-border-radius);
+  /* box-shadow: var(--schedule-shadow); */ /* Shadow might be too much for the main page container, consider for cards */
+  padding: 1rem; /* Adjust as needed */
+  /* min-height: 100vh; */ /* This might conflict with existing h-full and flex structure, let's rely on parent MainLayout for height */
+  width: 100%; /* Ensure it takes full width if not already */
+  box-sizing: border-box; /* Ensure padding and border are included in the element's total width and height */
 }
 
 /* Added for sidebar glowing effect */
