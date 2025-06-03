@@ -153,9 +153,10 @@ export default function AnalyticsPage() {
   
   return (
     <MainLayout>
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
-        <h2 className="text-2xl font-heading font-bold text-gray-800 mb-2 md:mb-0">Аналитика</h2>
-        
+      <div className="pt-8 mx-auto px-4 w-full max-w-7xl">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+          <h2 className="text-2xl font-heading font-bold text-gray-800 mb-2 md:mb-0">Аналитика</h2>
+
         <div className="flex flex-col sm:flex-row gap-2">
           <Select
             value={selectedClassId}
@@ -649,6 +650,7 @@ export default function AnalyticsPage() {
           </Card>
         </>
       )}
+      </div>
     </MainLayout>
   );
 }
