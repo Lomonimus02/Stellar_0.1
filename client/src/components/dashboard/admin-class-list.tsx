@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { PlusIcon, PencilIcon, ClipboardCheck, School, Trash2Icon } from "lucide-react";
-import { Class, insertClassSchema } from "@shared/schema";
+import { Class, insertClassSchema, ClassWithStudentCount } from "@shared/schema";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
@@ -61,11 +61,11 @@ export function AdminClassList() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [selectedClass, setSelectedClass] = useState<Class | null>(null);
+  const [selectedClass, setSelectedClass] = useState<ClassWithStudentCount | null>(null);
   const currentYear = new Date().getFullYear();
   
   // Get classes for the school admin's school
-  const { data: classes = [], isLoading } = useQuery<Class[]>({
+  const { data: classes = [], isLoading } = useQuery<ClassWithStudentCount[]>({
     queryKey: ["/api/classes"],
     enabled: !!user && !!user.schoolId
   });
@@ -282,7 +282,7 @@ export function AdminClassList() {
                     <div className="text-sm font-medium text-slate-700">{classItem.gradeLevel}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500"> {/* Text color for badge content might need adjustment if illegible */}
-                    <Badge variant="outline" className="bg-primary-50 border-0">0</Badge>
+                    <Badge variant="outline" className="bg-primary-50 border-0">{classItem.studentCount ?? 0}</Badge>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-slate-700">{classItem.academicYear}</div>

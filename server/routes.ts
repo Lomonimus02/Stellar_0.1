@@ -884,6 +884,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
     }
+    // Calculate student count for each class
+    for (const classObj of classes) {
+      const studentsInClass = await db.select().from(studentClassesTable).where(eq(studentClassesTable.classId, classObj.id));
+      classObj.studentCount = studentsInClass.length;
+    }
     
     res.json(classes);
   });

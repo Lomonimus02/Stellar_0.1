@@ -446,6 +446,7 @@ export type School = typeof schools.$inferSelect;
 
 export type InsertClass = z.infer<typeof insertClassSchema>;
 export type Class = typeof classes.$inferSelect;
+export type ClassWithStudentCount = Class & { studentCount?: number };
 
 export type InsertSubject = z.infer<typeof insertSubjectSchema>;
 export type Subject = typeof subjects.$inferSelect;
