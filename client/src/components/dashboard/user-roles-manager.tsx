@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Plus, Trash } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useRoleCheck } from '@/hooks/use-role-check';
+import { useAuth } from '@/hooks/use-auth';
 import { apiRequest } from '@/lib/queryClient';
 import { UserRoleEnum } from '@shared/schema';
 
@@ -43,7 +44,8 @@ interface UserRolesManagerProps {
 
 const UserRolesManager: React.FC<UserRolesManagerProps> = ({ userId }) => {
   const { toast } = useToast();
-  const { isSuperAdmin } = useRoleCheck();
+  const { isSuperAdmin, isSchoolAdmin } = useRoleCheck();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newRole, setNewRole] = useState<UserRoleEnum | ''>('');
@@ -56,10 +58,32 @@ const UserRolesManager: React.FC<UserRolesManagerProps> = ({ userId }) => {
     queryKey: [`/api/user-roles/${userId}`],
   });
 
-  // Fetch schools (for school-specific roles)
+  // Fetch schools (for school-specific roles) - only for super admin
   const { data: schools = [], isLoading: isLoadingSchools } = useQuery<School[]>({
     queryKey: ['/api/schools'],
+    enabled: isSuperAdmin(), // Only load schools for super admin
   });
+
+  // Fetch user roles to get school admin's school
+  const { data: currentUserRoles = [] } = useQuery({
+    queryKey: ["/api/my-roles"],
+    enabled: isSchoolAdmin()
+  });
+
+  // Function to get school admin's school ID
+  const getSchoolAdminSchoolId = () => {
+    if (!isSchoolAdmin()) return null;
+
+    // Check user profile first
+    if (user?.schoolId) return user.schoolId;
+
+    // Check user roles
+    const schoolAdminRole = currentUserRoles.find((role: any) =>
+      role.role === UserRoleEnum.SCHOOL_ADMIN && role.schoolId
+    );
+
+    return schoolAdminRole?.schoolId || null;
+  };
 
   // Fetch all classes
   const { data: allClasses = [] } = useQuery<Class[]>({
@@ -69,6 +93,14 @@ const UserRolesManager: React.FC<UserRolesManagerProps> = ({ userId }) => {
 
   // Fetch classes for the selected school
   useEffect(() => {
+    // For school admin, automatically use their school
+    if (isSchoolAdmin() && !selectedSchoolId) {
+      const schoolId = getSchoolAdminSchoolId();
+      if (schoolId) {
+        setSelectedSchoolId(schoolId);
+      }
+    }
+
     if (selectedSchoolId && (newRole === UserRoleEnum.CLASS_TEACHER)) {
       // Filter classes by selected school
       const filteredClasses = allClasses.filter(cls => cls.schoolId === selectedSchoolId);
@@ -82,7 +114,7 @@ const UserRolesManager: React.FC<UserRolesManagerProps> = ({ userId }) => {
       setClasses([]);
       setSelectedClassId(null);
     }
-  }, [selectedSchoolId, newRole, allClasses, selectedClassId]);
+  }, [selectedSchoolId, newRole, allClasses, selectedClassId, isSchoolAdmin]);
 
   // Add role mutation
   const addRoleMutation = useMutation({
@@ -95,7 +127,11 @@ const UserRolesManager: React.FC<UserRolesManagerProps> = ({ userId }) => {
       return await res.json();
     },
     onSuccess: () => {
+      // Invalidate multiple related queries to ensure UI updates
       queryClient.invalidateQueries({ queryKey: [`/api/user-roles/${userId}`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/my-roles'] });
+
       toast({
         title: 'Роль добавлена',
         description: 'Роль пользователя успешно добавлена',
@@ -125,7 +161,11 @@ const UserRolesManager: React.FC<UserRolesManagerProps> = ({ userId }) => {
       return true;
     },
     onSuccess: () => {
+      // Invalidate multiple related queries to ensure UI updates
       queryClient.invalidateQueries({ queryKey: [`/api/user-roles/${userId}`] });
+      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/my-roles'] });
+
       toast({
         title: 'Роль удалена',
         description: 'Роль пользователя успешно удалена',
@@ -160,7 +200,13 @@ const UserRolesManager: React.FC<UserRolesManagerProps> = ({ userId }) => {
       UserRoleEnum.CLASS_TEACHER,
     ].includes(newRole as UserRoleEnum);
 
-    if (isSchoolRole && !selectedSchoolId) {
+    // For school admin, automatically use their school
+    let finalSchoolId = selectedSchoolId;
+    if (isSchoolRole && isSchoolAdmin()) {
+      finalSchoolId = getSchoolAdminSchoolId();
+    }
+
+    if (isSchoolRole && !finalSchoolId) {
       toast({
         title: 'Ошибка',
         description: 'Для этой роли необходимо выбрать школу',
@@ -182,17 +228,29 @@ const UserRolesManager: React.FC<UserRolesManagerProps> = ({ userId }) => {
     addRoleMutation.mutate({
       userId,
       role: newRole as UserRoleEnum,
-      schoolId: isSchoolRole ? selectedSchoolId : null,
+      schoolId: isSchoolRole ? finalSchoolId : null,
       classId: newRole === UserRoleEnum.CLASS_TEACHER ? selectedClassId : null,
     });
   };
 
   // Handle removing a role
   const handleRemoveRole = (roleId: number) => {
+    if (userRoles.length <= 1) {
+      toast({
+        title: 'Ошибка',
+        description: 'Нельзя удалить единственную роль пользователя',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (confirm('Вы уверены, что хотите удалить эту роль?')) {
       removeRoleMutation.mutate(roleId);
     }
   };
+
+  // Check if role can be removed (user must have more than one role)
+  const canRemoveRole = userRoles.length > 1;
 
   // Get role label
   const getRoleLabel = (role: UserRoleEnum) => {
@@ -290,8 +348,8 @@ const UserRolesManager: React.FC<UserRolesManagerProps> = ({ userId }) => {
                 </Select>
               </div>
 
-              {/* Show school selection for roles that require it */}
-              {newRole && doesRoleRequireSchool(newRole as UserRoleEnum) && (
+              {/* Show school selection for roles that require it - only for super admin */}
+              {newRole && doesRoleRequireSchool(newRole as UserRoleEnum) && !isSchoolAdmin() && (
                 <div className="grid gap-2">
                   <Label htmlFor="school">Школа</Label>
                   <Select
@@ -366,7 +424,7 @@ const UserRolesManager: React.FC<UserRolesManagerProps> = ({ userId }) => {
             <TableHeader>
               <TableRow>
                 <TableHead>Роль</TableHead>
-                <TableHead>Школа</TableHead>
+                {!isSchoolAdmin() && <TableHead>Школа</TableHead>}
                 <TableHead>Класс</TableHead>
                 <TableHead className="w-[100px]"></TableHead>
               </TableRow>
@@ -379,31 +437,45 @@ const UserRolesManager: React.FC<UserRolesManagerProps> = ({ userId }) => {
                       {getRoleLabel(role.role)}
                     </Badge>
                   </TableCell>
-                  <TableCell>
-                    {role.schoolId ? (
-                      schools.find((s) => s.id === role.schoolId)?.name || `Школа ID: ${role.schoolId}`
-                    ) : (
-                      <span className="text-muted-foreground">Нет привязки к школе</span>
-                    )}
-                  </TableCell>
+                  {!isSchoolAdmin() && (
+                    <TableCell>
+                      {role.schoolId ? (
+                        schools.find((s) => s.id === role.schoolId)?.name || `Школа ID: ${role.schoolId}`
+                      ) : (
+                        <span className="text-muted-foreground">Нет привязки к школе</span>
+                      )}
+                    </TableCell>
+                  )}
                   <TableCell>
                     {role.classId ? (
-                      allClasses.find((c) => c.id === role.classId)?.name || 
+                      allClasses.find((c) => c.id === role.classId)?.name ||
                       `Класс ID: ${role.classId}`
                     ) : (
                       <span className="text-muted-foreground">-</span>
                     )}
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemoveRole(role.id)}
-                      disabled={removeRoleMutation.isPending}
-                    >
-                      {removeRoleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      <Trash className="h-4 w-4 text-destructive" />
-                    </Button>
+                    {canRemoveRole ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveRole(role.id)}
+                        disabled={removeRoleMutation.isPending}
+                        title="Удалить роль"
+                      >
+                        {removeRoleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        <Trash className="h-4 w-4 text-destructive" />
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled
+                        title="Нельзя удалить единственную роль"
+                      >
+                        <Trash className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

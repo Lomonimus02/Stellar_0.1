@@ -53,36 +53,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.status(401).json({ message: "Unauthorized" });
   };
   
+  // Helper function to get user's primary role (first role in the list)
+  const getUserPrimaryRole = (user: Express.User): UserRoleEnum | null => {
+    if (!user.roles || user.roles.length === 0) return null;
+    return user.roles[0].role;
+  };
+
+  // Helper function to check if user has a specific role
+  const userHasRole = (user: Express.User, role: UserRoleEnum): boolean => {
+    if (!user.roles) return false;
+    return user.roles.some(r => r.role === role);
+  };
+
   // Middleware to check if user has specific role (uses roles from session)
-  const hasRole = (roles: UserRoleEnum[]) => (req, res, next) => { // Removed async as DB call is gone
+  const hasRole = (roles: UserRoleEnum[]) => (req, res, next) => {
     if (!req.isAuthenticated()) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
     // Check if the user object exists and has roles (it should after deserializeUser)
-    if (!req.user || !req.user.roles) {
+    if (!req.user || !req.user.roles || req.user.roles.length === 0) {
        console.error("User object or roles not found in request after authentication.");
        return res.status(500).json({ message: "Internal Server Error - User data incomplete" });
     }
-    
-    // Combine the primary role and additional roles from the session
-    const userSessionRoles = [req.user.role, ...req.user.roles.map(r => r.role as UserRoleEnum)];
 
-    // Check if the active role is allowed
-    if (req.user.activeRole && roles.includes(req.user.activeRole)) {
+    // Get all user roles from the session
+    const userSessionRoles = req.user.roles.map(r => r.role as UserRoleEnum);
+
+    // Super admin always has access (check if user has super admin role)
+    if (userSessionRoles.includes(UserRoleEnum.SUPER_ADMIN)) {
       return next();
     }
 
-    // Super admin always has access
-    if (req.user.role === UserRoleEnum.SUPER_ADMIN) {
-      return next();
-    }
-
-    // Check if any of the user's roles (primary or additional) from the session match the required roles
+    // Check if any of the user's roles from the session match the required roles
     if (userSessionRoles.some(userRole => userRole && roles.includes(userRole))) {
       return next();
     }
-    
+
     // If none of the checks passed, the user does not have the required role
     console.log(`Access denied for user ${req.user.username} (activeRole: ${req.user.activeRole}). Required roles: ${roles.join(', ')}. User roles: ${userSessionRoles.join(', ')}`);
     return res.status(403).json({ message: "Forbidden - Insufficient permissions" });
@@ -696,7 +703,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Decrypt the fetched user data before sending
       const decryptedUsers = decryptUserList(users);
 
-      res.json(decryptedUsers);
+      // Add user roles to each user
+      const usersWithRoles = await Promise.all(
+        decryptedUsers.map(async (user) => {
+          const userRoles = await dataStorage.getUserRoles(user.id);
+          return {
+            ...user,
+            roles: userRoles
+          };
+        })
+      );
+
+      res.json(usersWithRoles);
     } catch (error) {
       console.error("Ошибка при получении пользователей:", error);
       return res.status(500).json({ message: "Внутренняя ошибка сервера" });
@@ -709,21 +727,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Check if the user is authorized to create this type of user
       const currentUser = req.user;
       const newUserRole = req.body.role;
+      const currentUserPrimaryRole = getUserPrimaryRole(currentUser);
 
       // School admin cannot create SUPER_ADMIN users
-      if (currentUser.role === UserRoleEnum.SCHOOL_ADMIN && newUserRole === UserRoleEnum.SUPER_ADMIN) {
+      if (userHasRole(currentUser, UserRoleEnum.SCHOOL_ADMIN) && newUserRole === UserRoleEnum.SUPER_ADMIN) {
         return res.status(403).send("У вас нет прав для создания главного администратора");
       }
 
       // Validate permissions based on user roles
-      if (currentUser.role !== UserRoleEnum.SUPER_ADMIN &&
+      if (!userHasRole(currentUser, UserRoleEnum.SUPER_ADMIN) &&
           (newUserRole === UserRoleEnum.SUPER_ADMIN ||
-           newUserRole === UserRoleEnum.SCHOOL_ADMIN && currentUser.role !== UserRoleEnum.SCHOOL_ADMIN)) {
+           newUserRole === UserRoleEnum.SCHOOL_ADMIN && !userHasRole(currentUser, UserRoleEnum.SCHOOL_ADMIN))) {
         return res.status(403).send("У вас нет прав для создания пользователя с данной ролью");
       }
-      
+
       // School admin can only create users for their school
-      if (currentUser.role === UserRoleEnum.SCHOOL_ADMIN && 
+      if (userHasRole(currentUser, UserRoleEnum.SCHOOL_ADMIN) &&
           req.body.schoolId !== currentUser.schoolId) {
         return res.status(403).send("Вы можете создавать пользователей только для своей школы");
       }
@@ -734,21 +753,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).send("Пользователь с таким логином уже существует");
       }
 
-      // Create the user
+      // Create the user (without role field)
       const hashedPassword = await dataStorage.hashPassword(req.body.password);
+      const { role, ...userDataWithoutRole } = req.body;
       const user = await dataStorage.createUser({
-        ...req.body,
+        ...userDataWithoutRole,
         password: hashedPassword,
       });
 
+      // Add the primary role to user_roles table
+      await dataStorage.addUserRole({
+        userId: user.id,
+        role: newUserRole,
+        schoolId: req.body.schoolId || null,
+        classId: null
+      });
+
+      // Set the active role to the primary role
+      await dataStorage.updateUser(user.id, { activeRole: newUserRole });
+
       // Process related data (class assignments, parent-student connections, etc.)
       if (newUserRole === UserRoleEnum.CLASS_TEACHER && req.body.classIds && req.body.classIds.length > 0) {
-        // Add class teacher role
-        await dataStorage.addUserRole({
-          userId: user.id,
-          role: UserRoleEnum.CLASS_TEACHER,
-          classId: req.body.classIds[0]
-        });
+        // Update the role with class information
+        const userRoles = await dataStorage.getUserRoles(user.id);
+        const primaryRole = userRoles.find(r => r.role === newUserRole);
+        if (primaryRole) {
+          await dataStorage.updateUserRole(primaryRole.id, {
+            classId: req.body.classIds[0]
+          });
+        }
       }
       
       // Если создается студент и указан класс - добавляем запись в таблицу student_classes
@@ -784,7 +817,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await dataStorage.createSystemLog({
         userId: currentUser.id,
         action: "user_created",
-        details: `Created user ${user.username} with role ${user.role}`,
+        details: `Created user ${user.username} with role ${newUserRole}`,
         ipAddress: req.ip
       });
 
@@ -961,38 +994,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Check permissions
-      if (req.user.role === UserRoleEnum.SUPER_ADMIN) {
+      if (userHasRole(req.user, UserRoleEnum.SUPER_ADMIN)) {
         // Super admin can access any class
-      } else if (req.user.role === UserRoleEnum.SCHOOL_ADMIN || 
-                req.user.role === UserRoleEnum.PRINCIPAL || 
-                req.user.role === UserRoleEnum.VICE_PRINCIPAL) {
+      } else if (userHasRole(req.user, UserRoleEnum.SCHOOL_ADMIN) ||
+                userHasRole(req.user, UserRoleEnum.PRINCIPAL) ||
+                userHasRole(req.user, UserRoleEnum.VICE_PRINCIPAL)) {
         // School admin, principal, and vice principal can access classes in their school only
         if (classObj.schoolId !== req.user.schoolId) {
           return res.status(403).json({ message: "You can only access classes in your school" });
         }
-      } else if (req.user.role === UserRoleEnum.CLASS_TEACHER) {
+      } else if (userHasRole(req.user, UserRoleEnum.CLASS_TEACHER)) {
         // Class teacher can access their assigned class
         const userRoles = await dataStorage.getUserRoles(req.user.id);
-        const classTeacherRole = userRoles.find(r => 
+        const classTeacherRole = userRoles.find(r =>
           r.role === UserRoleEnum.CLASS_TEACHER && r.classId === classId
         );
-        
+
         if (!classTeacherRole) {
           return res.status(403).json({ message: "You can only access your assigned class" });
         }
-      } else if (req.user.role === UserRoleEnum.TEACHER) {
+      } else if (userHasRole(req.user, UserRoleEnum.TEACHER)) {
         // Teacher can access classes they teach
         const schedules = await dataStorage.getSchedulesByTeacher(req.user.id);
         const teacherClassIds = [...new Set(schedules.map(s => s.classId))];
-        
+
         if (!teacherClassIds.includes(classId)) {
           return res.status(403).json({ message: "You can only access classes you teach" });
         }
-      } else if (req.user.role === UserRoleEnum.STUDENT) {
+      } else if (userHasRole(req.user, UserRoleEnum.STUDENT)) {
         // Student can access classes they are enrolled in
         const studentClasses = await dataStorage.getStudentClasses(req.user.id);
         const studentClassIds = studentClasses.map(c => c.id);
-        
+
         if (!studentClassIds.includes(classId)) {
           return res.status(403).json({ message: "You can only access classes you are enrolled in" });
         }
@@ -1072,21 +1105,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     
     // Проверка прав: школьный администратор может обновлять только классы своей школы
-    if (req.user.role === UserRoleEnum.SCHOOL_ADMIN) {
+    if (userHasRole(req.user, UserRoleEnum.SCHOOL_ADMIN)) {
       let userSchoolId = req.user.schoolId;
-      
+
       // Если у пользователя нет schoolId в профиле, проверяем роли
       if (!userSchoolId) {
         const userRoles = await dataStorage.getUserRoles(req.user.id);
-        const schoolAdminRole = userRoles.find(role => 
+        const schoolAdminRole = userRoles.find(role =>
           role.role === UserRoleEnum.SCHOOL_ADMIN && role.schoolId
         );
-        
+
         if (schoolAdminRole && schoolAdminRole.schoolId) {
           userSchoolId = schoolAdminRole.schoolId;
         }
       }
-      
+
       // Проверяем принадлежность класса к школе пользователя
       if (!userSchoolId || classData.schoolId !== userSchoolId) {
         return res.status(403).json({ message: "You can only update classes in your school" });
@@ -3788,33 +3821,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     
     // Админы могут видеть роли всех пользователей (с ограничениями для школьного админа)
-    if ([UserRoleEnum.SUPER_ADMIN, UserRoleEnum.SCHOOL_ADMIN].includes(req.user.role)) {
+    if (userHasRole(req.user, UserRoleEnum.SUPER_ADMIN) || userHasRole(req.user, UserRoleEnum.SCHOOL_ADMIN)) {
       // Проверка прав: школьный администратор может видеть роли только пользователей своей школы
-      if (req.user.role === UserRoleEnum.SCHOOL_ADMIN && user.schoolId !== req.user.schoolId) {
+      if (userHasRole(req.user, UserRoleEnum.SCHOOL_ADMIN) && user.schoolId !== req.user.schoolId) {
         return res.status(403).json({ message: "Forbidden. You don't have the required permissions." });
       }
-      
+
       const userRoles = await dataStorage.getUserRoles(userId);
       return res.json(userRoles);
     }
-    
+
     // Директор, завуч и классный руководитель могут видеть роли учеников из своей школы
-    if ([UserRoleEnum.PRINCIPAL, UserRoleEnum.VICE_PRINCIPAL, UserRoleEnum.CLASS_TEACHER].includes(req.user.role)) {
+    if (userHasRole(req.user, UserRoleEnum.PRINCIPAL) ||
+        userHasRole(req.user, UserRoleEnum.VICE_PRINCIPAL) ||
+        userHasRole(req.user, UserRoleEnum.CLASS_TEACHER)) {
       // Проверка, что пользователь из той же школы
       if (user.schoolId !== req.user.schoolId) {
         return res.status(403).json({ message: "Forbidden. User is not from your school." });
       }
-      
+
       // Дополнительно для классного руководителя - может видеть только роли учеников своего класса
-      if (req.user.role === UserRoleEnum.CLASS_TEACHER) {
+      if (userHasRole(req.user, UserRoleEnum.CLASS_TEACHER)) {
         // Проверяем, что просматриваемый пользователь - ученик
-        if (user.role !== UserRoleEnum.STUDENT) {
+        const targetUserRoles = await dataStorage.getUserRoles(userId);
+        const isStudent = targetUserRoles.some(r => r.role === UserRoleEnum.STUDENT);
+        if (!isStudent) {
           return res.status(403).json({ message: "Forbidden. You can only view student roles." });
         }
-        
+
         // TODO: дополнительные проверки для классного руководителя можно добавить здесь
       }
-      
+
       const userRoles = await dataStorage.getUserRoles(userId);
       return res.json(userRoles);
     }
@@ -3969,23 +4006,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(404).json({ message: "User not found" });
     }
 
+    // Check if user can remove this role (cannot remove the only role)
+    const canRemove = await dataStorage.canRemoveUserRole(userRole.userId);
+    if (!canRemove) {
+      return res.status(400).json({ message: "Cannot remove the only role. User must have at least one role." });
+    }
+
     // School admin cannot remove SUPER_ADMIN roles or manage SUPER_ADMIN users
-    if (req.user.role === UserRoleEnum.SCHOOL_ADMIN) {
+    if (userHasRole(req.user, UserRoleEnum.SCHOOL_ADMIN)) {
       if (userRole.role === UserRoleEnum.SUPER_ADMIN) {
         return res.status(403).json({ message: "You cannot remove SUPER_ADMIN role" });
       }
-      if (user.role === UserRoleEnum.SUPER_ADMIN) {
+      // Check if user has SUPER_ADMIN role
+      const userRoles = await dataStorage.getUserRoles(user.id);
+      if (userRoles.some(r => r.role === UserRoleEnum.SUPER_ADMIN)) {
         return res.status(403).json({ message: "You cannot manage SUPER_ADMIN users" });
       }
     }
 
     // Проверка прав: школьный администратор может удалять роли только пользователям своей школы
-    if (req.user.role === UserRoleEnum.SCHOOL_ADMIN && user.schoolId !== req.user.schoolId) {
+    if (userHasRole(req.user, UserRoleEnum.SCHOOL_ADMIN) && user.schoolId !== req.user.schoolId) {
       return res.status(403).json({ message: "Forbidden" });
     }
-    
+
     await dataStorage.removeUserRole(id);
-    
+
+    // If the removed role was the active role, set a new active role
+    if (user.activeRole === userRole.role) {
+      const remainingRoles = await dataStorage.getUserRoles(userRole.userId);
+      if (remainingRoles.length > 0) {
+        await dataStorage.updateUser(userRole.userId, { activeRole: remainingRoles[0].role });
+      }
+    }
+
     // Log the action
     await dataStorage.createSystemLog({
       userId: req.user.id,
@@ -3993,33 +4046,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       details: `Removed role ${userRole.role} from user ${userRole.userId}`,
       ipAddress: req.ip
     });
-    
+
     res.status(200).json({ message: "User role removed" });
   });
   
   // Получение списка всех доступных ролей пользователя
   app.get("/api/my-roles", isAuthenticated, async (req, res) => {
     const userRoles = await dataStorage.getUserRoles(req.user.id);
-    
-    // Добавляем основную роль пользователя, если её нет в списке
-    const roleExists = userRoles.some(ur => ur.role === req.user.role);
-    
+
+    // Все роли теперь хранятся в user_roles, нет основной роли
     const result = [...userRoles];
-    
-    if (!roleExists) {
-      // Добавим основную роль пользователя с виртуальным ID и пометим как default
-      result.unshift({
-        id: -1, // Виртуальный ID для основной роли
-        userId: req.user.id,
-        role: req.user.role,
-        schoolId: req.user.schoolId,
-        classId: req.user.classId || null, // Добавляем classId если он есть
-        isDefault: true
-      });
-    }
-    
+
     // Проверим, существует ли активная роль среди доступных ролей пользователя
-    const activeRoleExists = req.user.activeRole && 
+    const activeRoleExists = req.user.activeRole &&
                             result.some(role => role.role === req.user.activeRole);
 
     // Пометим активную роль или первую доступную, если активной больше нет
@@ -4032,7 +4071,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Если активной роли нет или она была удалена, пометим первую роль как активную
       if (result.length > 0) {
         result[0].isActive = true;
-        
+
         // Также обновим активную роль в сессии
         if (req.session) {
           const user = req.user as any;
@@ -4041,7 +4080,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
     }
-    
+
     res.json(result);
   });
 
@@ -4056,10 +4095,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     
     // Проверяем, имеет ли пользователь эту роль
     const userRoles = await dataStorage.getUserRoles(userId);
-    const hasMainRole = req.user.role === activeRole;
-    const hasAdditionalRole = userRoles.some(r => r.role === activeRole);
-    
-    if (!hasMainRole && !hasAdditionalRole) {
+    const hasRole = userRoles.some(r => r.role === activeRole);
+
+    if (!hasRole) {
       return res.status(400).json({ message: "User does not have this role" });
     }
     

@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MainLayout } from "@/components/layout/main-layout";
 import { useAuth } from "@/hooks/use-auth";
 import { useRoleCheck } from "@/hooks/use-role-check";
-import { UserRoleEnum, User, insertUserSchema, Class, ParentStudent } from "@shared/schema";
+import { UserRoleEnum, User, UserWithRoles, UserRoleModel, insertUserSchema, Class, ParentStudent } from "@shared/schema";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -147,11 +147,11 @@ export default function UsersPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<UserRoleEnum | "all">("all");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [selectedUser, setSelectedUser] = useState<UserWithRoles | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isRolesDialogOpen, setIsRolesDialogOpen] = useState(false);
-  const [selectedUserForRoles, setSelectedUserForRoles] = useState<User | null>(null);
+  const [selectedUserForRoles, setSelectedUserForRoles] = useState<UserWithRoles | null>(null);
   
   // Only Super admin, School admin and Principal can access this page
   if (!isAdmin()) {
@@ -168,7 +168,7 @@ export default function UsersPage() {
   }
   
   // Fetch users
-  const { data: users = [], isLoading, error, refetch } = useQuery<User[]>({
+  const { data: users = [], isLoading, error, refetch } = useQuery<UserWithRoles[]>({
     queryKey: ["/api/users"],
     enabled: isAdmin(),
     retry: 1,
@@ -188,7 +188,7 @@ export default function UsersPage() {
   });
   
   // Fetch schools for dropdown
-  const { isSuperAdmin } = useRoleCheck();
+  const { isSuperAdmin, isSchoolAdmin } = useRoleCheck();
   const { data: schools = [] } = useQuery({
     queryKey: ["/api/schools"],
     enabled: isSuperAdmin()
@@ -196,15 +196,20 @@ export default function UsersPage() {
   
   // Filter users based on search query and role filter
   const filteredUsers = users.filter(u => {
-    const matchesSearch = 
+    const matchesSearch =
       u.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.email.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesRole = roleFilter === "all" || u.role === roleFilter;
-    
-    return matchesSearch && matchesRole;
+
+    const matchesRole = roleFilter === "all" || userHasRole(u, roleFilter);
+
+    // Hide current user from the table if they are a super admin
+    const isCurrentUserSuperAdmin = isSuperAdmin();
+    const isCurrentUser = user && u.id === user.id;
+    const shouldHideCurrentUser = isCurrentUserSuperAdmin && isCurrentUser;
+
+    return matchesSearch && matchesRole && !shouldHideCurrentUser;
   });
   
   // Form for adding users
@@ -282,7 +287,7 @@ export default function UsersPage() {
   };
   
   // Set form values when editing
-  const setFormForEdit = (user: User) => {
+  const setFormForEdit = (user: UserWithRoles) => {
     console.log("Начало редактирования пользователя:", user);
 
     // Загружаем классы для ученика при редактировании
@@ -329,8 +334,76 @@ export default function UsersPage() {
       [UserRoleEnum.VICE_PRINCIPAL]: "Завуч",
       [UserRoleEnum.CLASS_TEACHER]: "Классный руководитель"
     };
-    
+
     return roleNames[role] || role;
+  };
+
+  // Check if user has a specific role
+  const userHasRole = (user: UserWithRoles, role: UserRoleEnum) => {
+    return user.roles?.some(ur => ur.role === role) || false;
+  };
+
+  // Check if current user can edit/delete another user
+  const canEditOrDeleteUser = (targetUser: UserWithRoles) => {
+    if (!user) return false;
+
+    // Super admin can edit/delete anyone except themselves (already handled above)
+    if (isSuperAdmin()) return true;
+
+    // School admin cannot edit/delete themselves
+    if (isSchoolAdmin() && user.id === targetUser.id) return false;
+
+    // School admin can edit/delete other users
+    return canEdit();
+  };
+
+  // Check if current user can manage roles for another user
+  const canManageUserRoles = (targetUser: UserWithRoles) => {
+    if (!user) return false;
+
+    // Super admin can manage anyone's roles except themselves (already handled above)
+    if (isSuperAdmin()) return true;
+
+    // School admin can manage roles for themselves and other users in their school
+    if (isSchoolAdmin()) return canEdit();
+
+    return canEdit();
+  };
+
+  // Get user's primary role (first role or active role)
+  const getUserPrimaryRole = (user: UserWithRoles): UserRoleEnum | null => {
+    if (!user.roles || user.roles.length === 0) return null;
+
+    // Try to find active role first
+    if (user.activeRole) {
+      const activeRoleExists = user.roles.some(ur => ur.role === user.activeRole);
+      if (activeRoleExists) return user.activeRole;
+    }
+
+    // Return first role as fallback
+    return user.roles[0].role;
+  };
+
+  // Get user roles display
+  const getUserRolesDisplay = (userRoles: UserRoleModel[] | undefined) => {
+    if (!userRoles || userRoles.length === 0) {
+      return <span className="text-slate-500 italic">Нет ролей</span>;
+    }
+
+    if (userRoles.length === 1) {
+      return <span className="text-slate-600">{getRoleName(userRoles[0].role)}</span>;
+    }
+
+    // Multiple roles - show them as a comma-separated list
+    const roleNames = userRoles.map(ur => getRoleName(ur.role));
+    return (
+      <span className="text-slate-600" title={roleNames.join(', ')}>
+        {roleNames.length > 2
+          ? `${roleNames.slice(0, 2).join(', ')} +${roleNames.length - 2}`
+          : roleNames.join(', ')
+        }
+      </span>
+    );
   };
   
   // Add user mutation
@@ -452,18 +525,18 @@ export default function UsersPage() {
     }
   };
   
-  const handleEdit = (user: User) => {
+  const handleEdit = (user: UserWithRoles) => {
     setSelectedUser(user);
     setFormForEdit(user);
     setIsEditDialogOpen(true);
   };
-  
-  const handleDelete = (user: User) => {
+
+  const handleDelete = (user: UserWithRoles) => {
     setSelectedUser(user);
     setIsDeleteDialogOpen(true);
   };
 
-  const handleManageRoles = (user: User) => {
+  const handleManageRoles = (user: UserWithRoles) => {
     setSelectedUserForRoles(user);
     setIsRolesDialogOpen(true);
   };
@@ -580,8 +653,8 @@ export default function UsersPage() {
   });
   
   // Filter students and parents
-  const students = users.filter(u => u.role === UserRoleEnum.STUDENT);
-  const parents = users.filter(u => u.role === UserRoleEnum.PARENT);
+  const students = users.filter(u => userHasRole(u, UserRoleEnum.STUDENT));
+  const parents = users.filter(u => userHasRole(u, UserRoleEnum.PARENT));
   
   const filteredStudents = searchStudentTerm 
     ? students.filter(student => 
@@ -921,21 +994,23 @@ export default function UsersPage() {
                     <TableRow key={u.id}>
                       <TableCell className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-800">{u.firstName} {u.lastName}</TableCell>
                       <TableCell className="px-6 py-4 whitespace-nowrap text-sm text-slate-800">{u.username}</TableCell>
-                      <TableCell className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{getRoleName(u.role)}</TableCell>
+                      <TableCell className="px-6 py-4 whitespace-nowrap text-sm">{getUserRolesDisplay(u.roles)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          {canEdit() && (
+                          {canEditOrDeleteUser(u) && (
                             <>
                               <Button variant="ghost" size="sm" onClick={() => handleEdit(u)}>
                                 <Pencil className="h-4 w-4 text-[rgb(2,191,122)]" />
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={() => handleManageRoles(u)}>
-                                <UserCog className="h-4 w-4 text-blue-500" />
                               </Button>
                               <Button variant="ghost" size="sm" className="text-red-400 hover:text-red-500" onClick={() => handleDelete(u)}>
                                 <Trash2 className="h-4 w-4 text-red-400" />
                               </Button>
                             </>
+                          )}
+                          {canManageUserRoles(u) && (
+                            <Button variant="ghost" size="sm" onClick={() => handleManageRoles(u)}>
+                              <UserCog className="h-4 w-4 text-blue-500" />
+                            </Button>
                           )}
                         </div>
                       </TableCell>
@@ -2085,9 +2160,10 @@ export default function UsersPage() {
 }
 
 // Inline User Roles Manager Component
-function UserRolesInlineManager({ userId, user }: { userId: number; user: User }) {
+function UserRolesInlineManager({ userId, user }: { userId: number; user: UserWithRoles }) {
+  const { user: currentUser } = useAuth();
   const { toast } = useToast();
-  const { isSuperAdmin } = useRoleCheck();
+  const { isSuperAdmin, isSchoolAdmin } = useRoleCheck();
   const [isAddingRole, setIsAddingRole] = useState(false);
   const [editingRole, setEditingRole] = useState<any>(null);
   const [newRole, setNewRole] = useState<UserRoleEnum | ''>('');
@@ -2102,11 +2178,32 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
   // Refetch users to update the main table
   const queryClient = useQueryClient();
 
-  // Fetch schools
+  // Fetch schools - only for super admin
   const { data: schools = [] } = useQuery<any[]>({
     queryKey: ["/api/schools"],
     enabled: isSuperAdmin()
   });
+
+  // Fetch user roles to get school admin's school
+  const { data: currentUserRoles = [] } = useQuery({
+    queryKey: ["/api/my-roles"],
+    enabled: isSchoolAdmin()
+  });
+
+  // Function to get school admin's school ID
+  const getSchoolAdminSchoolId = () => {
+    if (!isSchoolAdmin()) return null;
+
+    // Check user profile first
+    if (currentUser?.schoolId) return currentUser.schoolId;
+
+    // Check user roles
+    const schoolAdminRole = currentUserRoles.find((role: any) =>
+      role.role === UserRoleEnum.SCHOOL_ADMIN && role.schoolId
+    );
+
+    return schoolAdminRole?.schoolId || null;
+  };
 
   // Fetch classes
   const { data: allClasses = [] } = useQuery<any[]>({
@@ -2117,6 +2214,16 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
   const classes = selectedSchoolId
     ? allClasses.filter(cls => cls.schoolId === selectedSchoolId)
     : allClasses;
+
+  // Auto-set school for school admin when adding roles
+  useEffect(() => {
+    if (isSchoolAdmin() && !selectedSchoolId && newRole && doesRoleRequireSchool(newRole as UserRoleEnum)) {
+      const schoolId = getSchoolAdminSchoolId();
+      if (schoolId) {
+        setSelectedSchoolId(schoolId);
+      }
+    }
+  }, [newRole, isSchoolAdmin, selectedSchoolId]);
 
   // Helper function to check if role requires school
   const doesRoleRequireSchool = (role: UserRoleEnum) => {
@@ -2141,6 +2248,10 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
     },
     onSuccess: () => {
       refetchRoles();
+      // Invalidate multiple related queries to ensure UI updates
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      queryClient.invalidateQueries({ queryKey: ['/api/my-roles'] });
+
       toast({
         title: 'Роль добавлена',
         description: 'Роль пользователя успешно добавлена',
@@ -2172,7 +2283,10 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
     },
     onSuccess: () => {
       refetchRoles();
+      // Invalidate multiple related queries to ensure UI updates
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      queryClient.invalidateQueries({ queryKey: ['/api/my-roles'] });
+
       toast({
         title: 'Роль обновлена',
         description: 'Роль пользователя успешно обновлена',
@@ -2189,37 +2303,7 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
     },
   });
 
-  // Update main user role mutation
-  const updateMainRoleMutation = useMutation({
-    mutationFn: async (data: { role: UserRoleEnum; schoolId: number | null; classId: number | null }) => {
-      const res = await apiRequest(`/api/users/${userId}`, 'PUT', {
-        role: data.role,
-        schoolId: data.schoolId,
-        classId: data.classId
-      });
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.message || 'Не удалось обновить основную роль');
-      }
-      return await res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
-      toast({
-        title: 'Основная роль обновлена',
-        description: 'Основная роль пользователя успешно обновлена',
-      });
-      setEditingRole(null);
-      resetForm();
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Ошибка',
-        description: error.message,
-        variant: 'destructive',
-      });
-    },
-  });
+
 
   // Remove role mutation
   const removeRoleMutation = useMutation({
@@ -2233,6 +2317,10 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
     },
     onSuccess: () => {
       refetchRoles();
+      // Invalidate multiple related queries to ensure UI updates
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      queryClient.invalidateQueries({ queryKey: ['/api/my-roles'] });
+
       toast({
         title: 'Роль удалена',
         description: 'Роль пользователя успешно удалена',
@@ -2265,7 +2353,14 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
     }
 
     const isSchoolRole = doesRoleRequireSchool(newRole as UserRoleEnum);
-    if (isSchoolRole && !selectedSchoolId) {
+
+    // For school admin, automatically use their school
+    let finalSchoolId = selectedSchoolId;
+    if (isSchoolRole && isSchoolAdmin()) {
+      finalSchoolId = getSchoolAdminSchoolId();
+    }
+
+    if (isSchoolRole && !finalSchoolId) {
       toast({
         title: 'Ошибка',
         description: 'Для этой роли необходимо выбрать школу',
@@ -2286,7 +2381,7 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
     addRoleMutation.mutate({
       userId,
       role: newRole as UserRoleEnum,
-      schoolId: isSchoolRole ? selectedSchoolId : null,
+      schoolId: isSchoolRole ? finalSchoolId : null,
       classId: newRole === UserRoleEnum.CLASS_TEACHER ? selectedClassId : null,
     });
   };
@@ -2295,7 +2390,14 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
     if (!editingRole || !newRole) return;
 
     const isSchoolRole = doesRoleRequireSchool(newRole as UserRoleEnum);
-    if (isSchoolRole && !selectedSchoolId) {
+
+    // For school admin, automatically use their school
+    let finalSchoolId = selectedSchoolId;
+    if (isSchoolRole && isSchoolAdmin()) {
+      finalSchoolId = getSchoolAdminSchoolId();
+    }
+
+    if (isSchoolRole && !finalSchoolId) {
       toast({
         title: 'Ошибка',
         description: 'Для этой роли необходимо выбрать школу',
@@ -2313,24 +2415,27 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
       return;
     }
 
-    // Check if editing main role or additional role
-    if (editingRole.isMainRole) {
-      updateMainRoleMutation.mutate({
-        role: newRole as UserRoleEnum,
-        schoolId: isSchoolRole ? selectedSchoolId : null,
-        classId: newRole === UserRoleEnum.CLASS_TEACHER ? selectedClassId : null,
-      });
-    } else {
-      updateRoleMutation.mutate({
-        id: editingRole.id,
-        role: newRole as UserRoleEnum,
-        schoolId: isSchoolRole ? selectedSchoolId : null,
-        classId: newRole === UserRoleEnum.CLASS_TEACHER ? selectedClassId : null,
-      });
-    }
+    // Update the role
+    updateRoleMutation.mutate({
+      id: editingRole.id,
+      role: newRole as UserRoleEnum,
+      schoolId: isSchoolRole ? finalSchoolId : null,
+      classId: newRole === UserRoleEnum.CLASS_TEACHER ? selectedClassId : null,
+    });
   };
 
   const startEditRole = (role: any) => {
+    // Check if school admin is trying to edit their own school admin role
+    if (isSchoolAdmin() && currentUser && currentUser.id === user.id &&
+        role.role === UserRoleEnum.SCHOOL_ADMIN) {
+      toast({
+        title: 'Ошибка',
+        description: 'Вы не можете изменить свою роль администратора школы',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setEditingRole(role);
     setNewRole(role.role);
     setSelectedSchoolId(role.schoolId);
@@ -2338,23 +2443,46 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
     setIsAddingRole(true);
   };
 
-  const startEditMainRole = () => {
-    setEditingRole({
-      isMainRole: true,
-      role: user.role,
-      schoolId: user.schoolId,
-      classId: user.classId
-    });
-    setNewRole(user.role);
-    setSelectedSchoolId(user.schoolId);
-    setSelectedClassId(user.classId);
-    setIsAddingRole(true);
-  };
+
 
   const handleRemoveRole = (roleId: number) => {
+    if (userRoles.length <= 1) {
+      toast({
+        title: 'Ошибка',
+        description: 'Нельзя удалить единственную роль пользователя',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Check if school admin is trying to remove their own school admin role
+    const roleToRemove = userRoles.find(r => r.id === roleId);
+    if (isSchoolAdmin() && currentUser && currentUser.id === user.id &&
+        roleToRemove && roleToRemove.role === UserRoleEnum.SCHOOL_ADMIN) {
+      toast({
+        title: 'Ошибка',
+        description: 'Вы не можете удалить свою роль администратора школы',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (confirm('Вы уверены, что хотите удалить эту роль?')) {
       removeRoleMutation.mutate(roleId);
     }
+  };
+
+  // Check if role can be removed
+  const canRemoveRole = (role: any) => {
+    if (userRoles.length <= 1) return false;
+
+    // School admin cannot remove their own school admin role
+    if (isSchoolAdmin() && currentUser && currentUser.id === user.id &&
+        role.role === UserRoleEnum.SCHOOL_ADMIN) {
+      return false;
+    }
+
+    return true;
   };
 
   const getRoleLabel = (role: UserRoleEnum) => {
@@ -2385,72 +2513,60 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
       <div>
         <Label className="text-base font-medium">Роли пользователя</Label>
         <div className="mt-2 space-y-2">
-          {/* Main Role */}
-          <div className="flex items-center justify-between p-3 bg-white/15 backdrop-filter backdrop-blur-md rounded-xl border border-white/30">
-            <div className="flex-1">
-              <div className="font-medium text-slate-800">
-                {getRoleLabel(user.role)}
-                <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">Основная</span>
-              </div>
-              <div className="text-sm text-slate-600">
-                {user.schoolId && (
-                  <span>Школа: {schools.find(s => s.id === user.schoolId)?.name || `ID: ${user.schoolId}`}</span>
-                )}
-                {user.classId && (
-                  <span className="ml-2">Класс: {allClasses.find(c => c.id === user.classId)?.name || `ID: ${user.classId}`}</span>
-                )}
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={startEditMainRole}
-                disabled={updateMainRoleMutation.isPending}
-              >
-                <Pencil className="h-4 w-4 text-blue-500" />
-              </Button>
-            </div>
-          </div>
-
-          {/* Additional Roles */}
-          {userRoles.length > 0 && (
-            <>
-              <div className="text-sm font-medium text-slate-700 mt-4">Дополнительные роли:</div>
-              {userRoles.map((role) => (
-                <div key={role.id} className="flex items-center justify-between p-3 bg-white/10 backdrop-filter backdrop-blur-md rounded-xl border border-white/20">
-                  <div className="flex-1">
-                    <div className="font-medium text-slate-800">{getRoleLabel(role.role)}</div>
-                    <div className="text-sm text-slate-600">
-                      {role.schoolId && (
-                        <span>Школа: {schools.find(s => s.id === role.schoolId)?.name || `ID: ${role.schoolId}`}</span>
-                      )}
-                      {role.classId && (
-                        <span className="ml-2">Класс: {allClasses.find(c => c.id === role.classId)?.name || `ID: ${role.classId}`}</span>
-                      )}
-                    </div>
+          {/* All Roles */}
+          {userRoles.length > 0 ? (
+            userRoles.map((role, index) => (
+              <div key={role.id} className="flex items-center justify-between p-3 bg-white/10 backdrop-filter backdrop-blur-md rounded-xl border border-white/20">
+                <div className="flex-1">
+                  <div className="font-medium text-slate-800">
+                    {getRoleLabel(role.role)}
                   </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => startEditRole(role)}
-                      disabled={updateRoleMutation.isPending}
-                    >
-                      <Pencil className="h-4 w-4 text-blue-500" />
-                    </Button>
+                  <div className="text-sm text-slate-600">
+                    {!isSchoolAdmin() && role.schoolId && (
+                      <span>Школа: {schools.find(s => s.id === role.schoolId)?.name || `ID: ${role.schoolId}`}</span>
+                    )}
+                    {role.classId && (
+                      <span className={!isSchoolAdmin() && role.schoolId ? "ml-2" : ""}>Класс: {allClasses.find(c => c.id === role.classId)?.name || `ID: ${role.classId}`}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => startEditRole(role)}
+                    disabled={updateRoleMutation.isPending || (isSchoolAdmin() && currentUser && currentUser.id === user.id && role.role === UserRoleEnum.SCHOOL_ADMIN)}
+                    title={isSchoolAdmin() && currentUser && currentUser.id === user.id && role.role === UserRoleEnum.SCHOOL_ADMIN ? "Вы не можете изменить свою роль администратора школы" : "Редактировать роль"}
+                  >
+                    <Pencil className="h-4 w-4 text-blue-500" />
+                  </Button>
+                  {canRemoveRole(role) ? (
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => handleRemoveRole(role.id)}
                       disabled={removeRoleMutation.isPending}
+                      title="Удалить роль"
                     >
                       <Trash2 className="h-4 w-4 text-red-500" />
                     </Button>
-                  </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled
+                      title={userRoles.length <= 1 ? "Нельзя удалить единственную роль" : "Вы не можете удалить свою роль администратора школы"}
+                    >
+                      <Trash2 className="h-4 w-4 text-gray-400" />
+                    </Button>
+                  )}
                 </div>
-              ))}
-            </>
+              </div>
+            ))
+          ) : (
+            <div className="text-center py-6 text-muted-foreground">
+              У пользователя нет ролей
+            </div>
           )}
         </div>
       </div>
@@ -2506,18 +2622,22 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
                     <SelectItem value={UserRoleEnum.SCHOOL_ADMIN}>Администратор школы</SelectItem>
                   </>
                 )}
-                <SelectItem value={UserRoleEnum.TEACHER}>Учитель</SelectItem>
+                {(isSuperAdmin() || isSchoolAdmin()) && (
+                  <>
+                    <SelectItem value={UserRoleEnum.TEACHER}>Учитель</SelectItem>
+                    <SelectItem value={UserRoleEnum.PRINCIPAL}>Директор</SelectItem>
+                    <SelectItem value={UserRoleEnum.VICE_PRINCIPAL}>Завуч</SelectItem>
+                    <SelectItem value={UserRoleEnum.CLASS_TEACHER}>Классный руководитель</SelectItem>
+                  </>
+                )}
                 <SelectItem value={UserRoleEnum.STUDENT}>Ученик</SelectItem>
                 <SelectItem value={UserRoleEnum.PARENT}>Родитель</SelectItem>
-                <SelectItem value={UserRoleEnum.PRINCIPAL}>Директор</SelectItem>
-                <SelectItem value={UserRoleEnum.VICE_PRINCIPAL}>Завуч</SelectItem>
-                <SelectItem value={UserRoleEnum.CLASS_TEACHER}>Классный руководитель</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {/* School Selection */}
-          {newRole && doesRoleRequireSchool(newRole as UserRoleEnum) && (
+          {/* School Selection - only for super admin */}
+          {newRole && doesRoleRequireSchool(newRole as UserRoleEnum) && !isSchoolAdmin() && (
             <div>
               <Label htmlFor="school">Школа</Label>
               <Select
@@ -2573,10 +2693,10 @@ function UserRolesInlineManager({ userId, user }: { userId: number; user: User }
           <div className="flex gap-2">
             <Button
               onClick={editingRole ? handleUpdateRole : handleAddRole}
-              disabled={addRoleMutation.isPending || updateRoleMutation.isPending || updateMainRoleMutation.isPending}
+              disabled={addRoleMutation.isPending || updateRoleMutation.isPending}
               className="flex-1"
             >
-              {(addRoleMutation.isPending || updateRoleMutation.isPending || updateMainRoleMutation.isPending) && (
+              {(addRoleMutation.isPending || updateRoleMutation.isPending) && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               {editingRole ? 'Обновить' : 'Добавить'}

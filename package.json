@@ -10,7 +10,9 @@
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "migrate:student-classes": "tsx run-student-migration.js",
-    "test:student-classes": "tsx test-student-classes.js"
+    "test:student-classes": "tsx test-student-classes.js",
+    "create-superadmin": "tsx scripts/create-superadmin.js",
+    "verify-superadmin": "tsx scripts/verify-superadmin.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

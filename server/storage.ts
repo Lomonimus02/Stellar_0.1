@@ -146,6 +146,8 @@ export interface IStorage {
   addUserRole(userRole: InsertUserRole): Promise<UserRoleModel>;
   updateUserRole(id: number, userRole: Partial<InsertUserRole>): Promise<UserRoleModel | undefined>;
   removeUserRole(id: number): Promise<void>;
+  getUserPrimaryRole(userId: number): Promise<UserRoleEnum | null>;
+  canRemoveUserRole(userId: number): Promise<boolean>;
   
   // Subgroup operations
   getSubgroup(id: number): Promise<Subgroup | undefined>;
@@ -934,6 +936,21 @@ export class MemStorage implements IStorage {
 
   async removeUserRole(id: number): Promise<void> {
     this.userRoles.delete(id);
+  }
+
+  async getUserPrimaryRole(userId: number): Promise<UserRoleEnum | null> {
+    const userRolesList = Array.from(this.userRoles.values())
+      .filter(userRole => userRole.userId === userId)
+      .sort((a, b) => a.id - b.id);
+
+    return userRolesList.length > 0 ? userRolesList[0].role : null;
+  }
+
+  async canRemoveUserRole(userId: number): Promise<boolean> {
+    const userRolesList = Array.from(this.userRoles.values())
+      .filter(userRole => userRole.userId === userId);
+
+    return userRolesList.length > 1;
   }
 }
 

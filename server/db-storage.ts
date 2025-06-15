@@ -195,7 +195,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUsersByRole(role: UserRoleEnum): Promise<User[]> {
-    const usersList = await db.select().from(users).where(eq(users.role, role));
+    // Получаем пользователей через таблицу user_roles
+    const userIds = await db.select({ userId: userRoles.userId })
+      .from(userRoles)
+      .where(eq(userRoles.role, role));
+
+    if (userIds.length === 0) return [];
+
+    const usersList = await db.select().from(users)
+      .where(inArray(users.id, userIds.map(u => u.userId)));
     return decryptUsers(usersList);
   }
 
@@ -1105,6 +1113,26 @@ export class DatabaseStorage implements IStorage {
 
   async removeUserRole(id: number): Promise<void> {
     await db.delete(userRoles).where(eq(userRoles.id, id));
+  }
+
+  // Получить основную роль пользователя (первую в списке)
+  async getUserPrimaryRole(userId: number): Promise<UserRoleEnum | null> {
+    const userRolesList = await db.select()
+      .from(userRoles)
+      .where(eq(userRoles.userId, userId))
+      .orderBy(userRoles.id)
+      .limit(1);
+
+    return userRolesList.length > 0 ? userRolesList[0].role : null;
+  }
+
+  // Проверить, можно ли удалить роль (нельзя удалить единственную роль)
+  async canRemoveUserRole(userId: number): Promise<boolean> {
+    const userRolesList = await db.select()
+      .from(userRoles)
+      .where(eq(userRoles.userId, userId));
+
+    return userRolesList.length > 1;
   }
   
   // ===== Subgroup operations =====

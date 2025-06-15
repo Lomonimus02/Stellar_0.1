@@ -23,8 +23,6 @@ export const users = pgTable("users", {
   lastName: text("last_name").notNull(),
   email: text("email").notNull(),
   phone: text("phone"),
-  // Основная роль пользователя (для обратной совместимости)
-  role: text("role").$type<UserRoleEnum>().notNull(),
   // Текущая активная роль, выбранная пользователем
   activeRole: text("active_role").$type<UserRoleEnum>(),
   schoolId: integer("school_id"),
@@ -440,6 +438,7 @@ export const insertClassTimeSlotSchema = createInsertSchema(classTimeSlots).omit
 // Export types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+export type UserWithRoles = User & { roles?: UserRoleModel[] };
 
 export type InsertSchool = z.infer<typeof insertSchoolSchema>;
 export type School = typeof schools.$inferSelect;

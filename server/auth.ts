@@ -16,6 +16,7 @@ declare global {
   namespace Express {
     interface User extends Omit<User, 'password'> { // Exclude password for safety
       roles: UserRole[]; // Add the roles array
+      // activeRole is already part of the User type from schema
     }
   }
 }
@@ -122,44 +123,53 @@ export function setupAuth(app: Express) {
   });
 
   // Deserialize user directly from the session object
-  passport.deserializeUser((user: Express.User, done) => {
-    // No database call needed here, user object comes directly from session
-    // The roles are already part of the user object stored in the session
-    
-    // Basic validation: check if user object exists AND has the roles property
-    if (!user || !user.roles) { // Check for user.roles existence
-        // If roles are missing, the session data is likely outdated or corrupted.
-        // Treat this as an error to force re-authentication.
-        // Log the user ID if available for debugging
-        const userId = user ? user.id : 'unknown';
-        console.error(`User object found in session for ID ${userId}, but 'roles' property is missing. Invalidating session.`);
-        return done(new Error('Invalid session data: User roles missing.'), null);
-    }
-    
-    // Optional: Add a quick check for active role validity based on session roles
-    // This check does NOT involve DB calls
-    // We know user.roles exists here
-    if (user.activeRole) {
-        const allRoles = [user.role, ...user.roles.map(r => r.role)];
-        if (!allRoles.includes(user.activeRole)) {
-             // If activeRole is invalid based on session data,
-             // default to the primary role (or first available from roles)
-             // This doesn't update the DB, just the object for the current request
-             console.warn(`Session activeRole '${user.activeRole}' invalid for user '${user.username}', defaulting to '${user.role || user.roles[0]?.role}' for this request.`);
-             // Check user.roles.length before accessing index 0
-             user.activeRole = user.role || (user.roles.length > 0 ? user.roles[0].role : undefined);
-        }
-    } else if (user.roles.length > 0) { // Check user.roles.length before accessing index 0
-        // If active role is not set in session, default to first available role for this request
-        user.activeRole = user.roles[0].role;
-        console.log(`Session activeRole not set for user '${user.username}', defaulting to '${user.activeRole}' for this request.`);
-    } else if(user.role) {
-        // If no extra roles, default to the main role
-        user.activeRole = user.role;
+  passport.deserializeUser(async (user: Express.User, done) => {
+    // Basic validation: check if user object exists
+    if (!user) {
+        console.error(`No user object found in session.`);
+        return done(new Error('Invalid session data: User missing.'), null);
     }
 
-    // Remove the console.log related to DB check
-    // console.log(`Проверка активной роли для пользователя ${user.username}:`, { ... });
+    // If roles are missing or session is outdated, fetch fresh data from DB
+    if (!user.roles || user.roles.length === 0) {
+        console.log(`User ${user.username} has no roles in session, fetching from database...`);
+        try {
+            const userRoles = await dataStorage.getUserRoles(user.id);
+            user.roles = userRoles;
+
+            if (userRoles.length === 0) {
+                console.error(`User ${user.username} has no roles in database either.`);
+                return done(new Error('User has no roles assigned.'), null);
+            }
+        } catch (error) {
+            console.error(`Failed to fetch roles for user ${user.username}:`, error);
+            return done(new Error('Failed to fetch user roles.'), null);
+        }
+    }
+
+    // Validate and fix active role
+    const allRoles = user.roles.map(r => r.role);
+    if (user.activeRole && !allRoles.includes(user.activeRole)) {
+        console.warn(`Session activeRole '${user.activeRole}' invalid for user '${user.username}', defaulting to '${user.roles[0]?.role}' for this request.`);
+        user.activeRole = user.roles[0].role;
+
+        // Update the database with the corrected active role
+        try {
+            await dataStorage.updateUser(user.id, { activeRole: user.activeRole });
+        } catch (error) {
+            console.error(`Failed to update active role for user ${user.username}:`, error);
+        }
+    } else if (!user.activeRole && user.roles.length > 0) {
+        user.activeRole = user.roles[0].role;
+        console.log(`Session activeRole not set for user '${user.username}', defaulting to '${user.activeRole}' for this request.`);
+
+        // Update the database with the active role
+        try {
+            await dataStorage.updateUser(user.id, { activeRole: user.activeRole });
+        } catch (error) {
+            console.error(`Failed to set active role for user ${user.username}:`, error);
+        }
+    }
 
     return done(null, user); // Return the user object from session
   });
@@ -171,15 +181,18 @@ export function setupAuth(app: Express) {
         const currentUser = req.user as User;
         const newUserRole = req.body.role;
         
+        // Get user's primary role for permission checks
+        const primaryRole = await dataStorage.getUserPrimaryRole(currentUser.id);
+
         // Validate permissions based on user roles
-        if (currentUser.role !== UserRoleEnum.SUPER_ADMIN && 
-            (newUserRole === UserRoleEnum.SUPER_ADMIN || 
-             newUserRole === UserRoleEnum.SCHOOL_ADMIN && currentUser.role !== UserRoleEnum.SCHOOL_ADMIN)) {
+        if (primaryRole !== UserRoleEnum.SUPER_ADMIN &&
+            (newUserRole === UserRoleEnum.SUPER_ADMIN ||
+             newUserRole === UserRoleEnum.SCHOOL_ADMIN && primaryRole !== UserRoleEnum.SCHOOL_ADMIN)) {
           return res.status(403).send("У вас нет прав для создания пользователя с данной ролью");
         }
-        
+
         // School admin can only create users for their school
-        if (currentUser.role === UserRoleEnum.SCHOOL_ADMIN && 
+        if (primaryRole === UserRoleEnum.SCHOOL_ADMIN &&
             req.body.schoolId !== currentUser.schoolId) {
           return res.status(403).send("Вы можете создавать пользователей только для своей школы");
         }
@@ -200,12 +213,24 @@ export function setupAuth(app: Express) {
         return res.status(400).send("Пользователь с таким логином уже существует");
       }
 
-      // Create the user
+      // Create the user (without role field)
       const hashedPassword = await hashPassword(req.body.password);
+      const { role, ...userDataWithoutRole } = req.body;
       const user = await dataStorage.createUser({
-        ...req.body,
+        ...userDataWithoutRole,
         password: hashedPassword,
       });
+
+      // Add the primary role to user_roles table
+      await dataStorage.addUserRole({
+        userId: user.id,
+        role: req.body.role,
+        schoolId: req.body.schoolId || null,
+        classId: null
+      });
+
+      // Set the active role to the primary role
+      await dataStorage.updateUser(user.id, { activeRole: req.body.role });
 
       // Log the new user creation
       if (req.isAuthenticated()) {
@@ -213,7 +238,7 @@ export function setupAuth(app: Express) {
         await dataStorage.createSystemLog({
           userId: currentUser.id,
           action: "user_created",
-          details: `Created user ${user.username} with role ${user.role}`,
+          details: `Created user ${user.username} with role ${req.body.role}`,
           ipAddress: req.ip
         });
       }
@@ -243,11 +268,11 @@ export function setupAuth(app: Express) {
 
       // Check/Set activeRole during login, potentially updating the DB *once* if needed
       let activeRoleToSet = user.activeRole;
-      const allRoles = [user.role, ...userRoles.map(r => r.role)];
+      const allRoles = userRoles.map(r => r.role);
 
       if (user.activeRole) {
         if (!allRoles.includes(user.activeRole)) {
-          activeRoleToSet = user.role || (userRoles.length > 0 ? userRoles[0].role : undefined);
+          activeRoleToSet = userRoles.length > 0 ? userRoles[0].role : undefined;
           console.log(`Active role ${user.activeRole} invalid on login for ${user.username}, switching to ${activeRoleToSet}`);
           // Update DB *only* if the active role was invalid and needs correction
           if (activeRoleToSet) {
@@ -257,7 +282,7 @@ export function setupAuth(app: Express) {
         }
       } else {
         // If active role wasn't set, set it to the first available one
-        activeRoleToSet = user.role || (userRoles.length > 0 ? userRoles[0].role : undefined);
+        activeRoleToSet = userRoles.length > 0 ? userRoles[0].role : undefined;
         if (activeRoleToSet) {
              console.log(`Active role not set on login for ${user.username}, setting to ${activeRoleToSet}`);
             // Update DB *only* if we are setting an active role for the first time
