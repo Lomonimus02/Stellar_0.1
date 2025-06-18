@@ -1,0 +1,91 @@
+ ✗ [Low] Sensitive Cookie in HTTPS Session Without 'Secure' Attribute
+   Path: TaskTrackerPro/server/auth.ts, line 49
+   Info: Cookie misses the Secure attribute (it is false by default). Set it to true to protect the cookie from man-in-the-middle attacks.
+
+ ✗ [Low] Improper Type Validation
+   Path: TaskTrackerPro/server/routes.ts, line 777
+   Info: The type of this object, coming from body and the value of its length property can be controlled by the user. An attacker may craft the properties of the object to crash the application or bypass its logic. Consider checking the type of the object.
+
+ ✗ [Low] Improper Type Validation
+   Path: TaskTrackerPro/server/routes.ts, line 787
+   Info: The type of this object, coming from body and the value of its length property can be controlled by the user. An attacker may craft the properties of the object to crash the application or bypass its logic. Consider checking the type of the object.
+
+ ✗ [Low] Improper Type Validation
+   Path: TaskTrackerPro/server/routes.ts, line 2573
+   Info: The type of this object, coming from body and the value of its length property can be controlled by the user. An attacker may craft the properties of the object to crash the application or bypass its logic. Consider checking the type of the object.
+
+ ✗ [Low] Improper Type Validation
+   Path: TaskTrackerPro/server/routes.ts, line 4942
+   Info: The type of this object, coming from query and the value of its toString property can be controlled by the user. An attacker may craft the properties of the object to crash the application or bypass its logic. Consider checking the type of the object.
+
+ ✗ [Medium] Cross-site Scripting (XSS)
+   Path: TaskTrackerPro/client/src/pages/documents.tsx, line 340
+   Info: Unsanitized input from a React useState value flows into a React dynamic 'href' attribute, where it is used to dynamically construct the HTML page on client side. This may result in a DOM Based Cross-Site Scripting attack (DOMXSS).
+
+ ✗ [Medium] Information Exposure
+   Path: TaskTrackerPro/server/index.ts, line 31
+   Info: Disable X-Powered-By header for your Express app (consider using Helmet middleware), because it exposes information about the used framework to potential attackers.
+
+ ✗ [Medium] Use of a Broken or Risky Cryptographic Algorithm
+   Path: TaskTrackerPro/server/utils/encryption.ts, line 106
+   Info: Cipher Block Chaining mode (used in crypto.default.createCipheriv) does not provide integrity. Consider using  Galois/Counter mode.
+
+ ✗ [Medium] Use of a Broken or Risky Cryptographic Algorithm
+   Path: TaskTrackerPro/server/utils/encryption.ts, line 196
+   Info: Cipher Block Chaining mode (used in crypto.default.createCipheriv) does not provide integrity. Consider using  Galois/Counter mode.
+
+ ✗ [Medium] Use of a Broken or Risky Cryptographic Algorithm
+   Path: TaskTrackerPro/server/utils/encryption.ts, line 159
+   Info: Cipher Block Chaining mode (used in crypto.default.createDecipheriv) does not provide integrity. Consider using  Galois/Counter mode.
+
+ ✗ [Medium] Use of a Broken or Risky Cryptographic Algorithm
+   Path: TaskTrackerPro/server/utils/encryption.ts, line 232
+   Info: Cipher Block Chaining mode (used in crypto.default.createDecipheriv) does not provide integrity. Consider using  Galois/Counter mode.
+
+ ✗ [Medium] Use of Hardcoded Credentials
+   Path: TaskTrackerPro/server/storage.ts, line 251
+   Info: Do not hardcode passwords in code. Found hardcoded password used in password.
+
+ ✗ [Medium] Allocation of Resources Without Limits or Throttling
+   Path: TaskTrackerPro/server/routes.ts, line 2887
+   Info: Expensive operation (a file system operation) is performed by an endpoint handler which does not use a rate-limiting mechanism. It may enable the attackers to perform Denial-of-service attacks. Consider using a rate-limiting middleware such as express-limit.
+
+ ✗ [Medium] Allocation of Resources Without Limits or Throttling
+   Path: TaskTrackerPro/server/vite.ts, line 47
+   Info: Expensive operation (a file system operation) is performed by an endpoint handler which does not use a rate-limiting mechanism. It may enable the attackers to perform Denial-of-service attacks. Consider using a rate-limiting middleware such as express-limit.
+
+ ✗ [Medium] Use of Externally-Controlled Format String
+   Path: TaskTrackerPro/server/routes.ts, line 665
+   Info: Unsanitized user input from an HTTP parameter flows into log, where it is used as a format string. This may allow a user to inject unexpected content into an application log.
+
+ ✗ [Medium] Use of Externally-Controlled Format String
+   Path: TaskTrackerPro/server/routes.ts, line 668
+   Info: Unsanitized user input from an HTTP parameter flows into log, where it is used as a format string. This may allow a user to inject unexpected content into an application log.
+
+ ✗ [Medium] Use of Externally-Controlled Format String
+   Path: TaskTrackerPro/server/routes.ts, line 796
+   Info: Unsanitized user input from the HTTP request body flows into error, where it is used as a format string. This may allow a user to inject unexpected content into an application log.
+
+ ✗ [Medium] Use of Externally-Controlled Format String
+   Path: TaskTrackerPro/server/routes.ts, line 809
+   Info: Unsanitized user input from the HTTP request body flows into error, where it is used as a format string. This may allow a user to inject unexpected content into an application log.
+
+ ✗ [Medium] Use of Externally-Controlled Format String
+   Path: TaskTrackerPro/server/routes.ts, line 2710
+   Info: Unsanitized user input from the HTTP request body flows into log, where it is used as a format string. This may allow a user to inject unexpected content into an application log.
+
+ ✗ [Medium] Use of Externally-Controlled Format String
+   Path: TaskTrackerPro/server/routes.ts, line 2738
+   Info: Unsanitized user input from the HTTP request body flows into log, where it is used as a format string. This may allow a user to inject unexpected content into an application log.
+
+ ✗ [Medium] Cleartext Transmission of Sensitive Information
+   Path: TaskTrackerPro/server/routes.ts, line 4973
+   Info: http.createServer uses HTTP which is an insecure protocol and should not be used in code due to cleartext transmission of information. Data in cleartext in a communication channel can be sniffed by unauthorized actors. Consider using the https module instead.
+
+ ✗ [High] Path Traversal
+   Path: TaskTrackerPro/server/routes.ts, line 2840
+   Info: Unsanitized input from an uploaded file flows into fs/promises.unlink, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to delete arbitrary files.
+
+ ✗ [High] Cross-site Scripting (XSS)
+   Path: TaskTrackerPro/server/vite.ts, line 65
+   Info: Unsanitized input from the request URL flows into end, where it is used to render an HTML page returned to the user. This may result in a Cross-Site Scripting attack (XSS).
