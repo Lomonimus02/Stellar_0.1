@@ -27,8 +27,10 @@ import {
   Percent,
   AlertCircle,
   Loader2,
-  ShieldAlert
+  ShieldAlert,
+  FileDown
 } from "lucide-react";
+import { Document, Packer, Paragraph, Table, TableRow, TableCell, HeadingLevel } from "docx";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -980,6 +982,83 @@ export default function StudentGrades() {
     
     return Array.from(subjectSubgroupMap.values());
   }, [grades, subjects]);
+
+  // Export grades to DOCX
+  const exportToDocx = async () => {
+    const docSections: (Paragraph | Table)[] = [
+      new Paragraph({
+        text: `Оценки за ${periodLabel}`,
+        heading: HeadingLevel.HEADING_1,
+      }),
+    ];
+
+    subjectsWithGrades.forEach((subject: any) => {
+      const subjectGrades = filteredGradesByPeriod.filter(
+        (g) =>
+          g.subjectId === subject.id &&
+          (subject.subgroupId ? g.subgroupId === subject.subgroupId : !g.subgroupId)
+      );
+      if (subjectGrades.length === 0) return;
+
+      const rows: TableRow[] = [
+        new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph("Дата")] }),
+            new TableCell({ children: [new Paragraph("Оценка")] }),
+            new TableCell({ children: [new Paragraph("Комментарий")] }),
+          ],
+        }),
+        ...subjectGrades.map((g) =>
+          new TableRow({
+            children: [
+              new TableCell({
+                children: [
+                  new Paragraph(format(new Date(g.createdAt), "dd.MM.yyyy")),
+                ],
+              }),
+              new TableCell({
+                children: [new Paragraph(String(g.grade))],
+              }),
+              new TableCell({
+                children: [new Paragraph(g.comment || "")],
+              }),
+            ],
+          })
+        ),
+      ];
+
+      docSections.push(
+        new Paragraph({
+          text: getDisplayName(subject),
+          heading: HeadingLevel.HEADING_2,
+        })
+      );
+      docSections.push(new Table({ rows }));
+    });
+
+    if (docSections.length === 1) {
+      docSections.push(new Paragraph("Нет данных за выбранный период."));
+    }
+
+    const doc = new Document({
+      sections: [
+        {
+          properties: {},
+          children: docSections,
+        },
+      ],
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Оценки_${periodLabel}.docx`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
   
   // Функция для отображения состояния ошибок
   const renderErrorState = () => {
@@ -1074,17 +1153,21 @@ export default function StudentGrades() {
               </span>
             </div>
             
-            <Button 
-              variant="ghost" 
-              size="icon"
-              onClick={goToNextYear}
-              className="h-7 w-7"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={goToNextYear}
+            className="h-7 w-7"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
         </div>
+        <Button onClick={exportToDocx} className="ml-2">
+          <FileDown className="mr-2 h-4 w-4" />
+          Экспорт DOCX
+        </Button>
       </div>
+    </div>
       
       <Tabs defaultValue="table">
         <TabsList className="mb-6">
