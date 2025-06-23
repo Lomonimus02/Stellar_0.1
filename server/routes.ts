@@ -6536,6 +6536,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Export student grades to DOCX
+  app.get("/api/export-student-grades", isAuthenticated, async (req, res) => {
+    try {
+      const { studentId, fromDate, toDate } = req.query as Record<string, string>;
+      if (!studentId || !fromDate || !toDate) {
+        return res.status(400).json({ message: "Missing parameters" });
+      }
+
+      const parsedStudentId = parseInt(studentId);
+      const startDate = new Date(fromDate);
+      const endDate = new Date(toDate);
+
+      // Permission checks similar to /api/grades
+      if (userHasRole(req.user, UserRoleEnum.STUDENT) && req.user.id !== parsedStudentId) {
+        return res.status(403).json({ message: "You can only view your own grades" });
+      }
+
+      if (userHasRole(req.user, UserRoleEnum.PARENT)) {
+        const relationships = await dataStorage.getParentStudents(req.user.id);
+        const childIds = relationships.map(r => r.studentId);
+        if (!childIds.includes(parsedStudentId)) {
+          return res.status(403).json({ message: "You can only view your children's grades" });
+        }
+      }
+
+      const allGrades = await dataStorage.getGradesByStudent(parsedStudentId);
+      const grades = allGrades.filter(g => {
+        const d = new Date(g.createdAt);
+        return d >= startDate && d <= endDate;
+      });
+
+      const student = await dataStorage.getUser(parsedStudentId);
+      if (!student) return res.status(404).json({ message: "Student not found" });
+
+      const studentClasses = await dataStorage.getStudentClasses(parsedStudentId);
+      const classId = studentClasses[0]?.id;
+      const subjects: any[] = [];
+      if (classId) {
+        const schedules = await dataStorage.getSchedulesByClass(classId);
+        const subjectIds = [...new Set(schedules.map(s => s.subjectId))];
+        for (const sid of subjectIds) {
+          const subj = await dataStorage.getSubject(sid);
+          if (subj) subjects.push(subj);
+        }
+      }
+
+      const grouped: Record<number, any[]> = {};
+      for (const g of grades) {
+        if (!grouped[g.subjectId]) grouped[g.subjectId] = [];
+        grouped[g.subjectId].push(g);
+      }
+
+      const { Document, Packer, Paragraph, Table, TableRow, TableCell } = await import("docx");
+      const { format } = await import("date-fns");
+
+      const rows = [
+        new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph("Предмет")] }),
+            new TableCell({ children: [new Paragraph("Оценки")] }),
+            new TableCell({ children: [new Paragraph("Средняя")] }),
+          ],
+        }),
+      ];
+
+      for (const subject of subjects) {
+        const gs = grouped[subject.id] || [];
+        if (gs.length === 0) continue;
+        const avg = gs.reduce((sum, gr) => sum + (gr.grade as number), 0) / gs.length;
+        const gradesText = gs
+          .map(gr => `${format(new Date(gr.createdAt), 'dd.MM')}: ${gr.grade}`)
+          .join(', ');
+        rows.push(
+          new TableRow({
+            children: [
+              new TableCell({ children: [new Paragraph(subject.name)] }),
+              new TableCell({ children: [new Paragraph(gradesText)] }),
+              new TableCell({ children: [new Paragraph(avg.toFixed(1))] }),
+            ],
+          })
+        );
+      }
+
+      const doc = new Document({
+        sections: [
+          {
+            children: [
+              new Paragraph({ text: `Оценки ученика ${student.firstName} ${student.lastName}`, heading: "Heading1" }),
+              new Paragraph({ text: `Период: ${format(startDate, 'dd.MM.yyyy')} - ${format(endDate, 'dd.MM.yyyy')}`, spacing: { after: 200 } }),
+              new Table({ rows }),
+            ],
+          },
+        ],
+      });
+
+      const buffer = await Packer.toBuffer(doc);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename=student-grades-${parsedStudentId}.docx`);
+      res.end(Buffer.from(buffer));
+    } catch (error) {
+      console.error("Error exporting grades to docx:", error);
+      res.status(500).json({ message: "Failed to export grades" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

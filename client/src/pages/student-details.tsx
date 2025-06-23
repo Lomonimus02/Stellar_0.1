@@ -19,7 +19,8 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
-  GraduationCap
+  GraduationCap,
+  Download
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -342,6 +343,31 @@ export default function StudentDetailsPage() {
     }
   }, [periodAverages, studentClass?.gradingSystem]);
 
+  const exportDocx = async () => {
+    const periodData = selectedPeriod === 'year' ? yearPeriod : periods.find(p => p.key === selectedPeriod);
+    if (!periodData) return;
+    const fromDate = format(periodData.startDate, 'yyyy-MM-dd');
+    const toDate = format(periodData.endDate, 'yyyy-MM-dd');
+    try {
+      const res = await fetch(`/api/export-student-grades?studentId=${studentId}&fromDate=${fromDate}&toDate=${toDate}`);
+      if (!res.ok) {
+        toast({ title: 'Ошибка', description: 'Не удалось экспортировать данные' });
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `grades_${studentData?.lastName}_${studentData?.firstName}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({ title: 'Ошибка', description: 'Не удалось экспортировать данные' });
+    }
+  };
+
   if (studentLoading || classLoading) {
     return (
       <MainLayout>
@@ -456,6 +482,15 @@ export default function StudentDetailsPage() {
               >
                 {currentYear + 1}
                 <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportDocx}
+                className="flex items-center gap-1 ml-2"
+              >
+                <Download className="h-4 w-4" />
+                DOCX
               </Button>
             </div>
           </div>
