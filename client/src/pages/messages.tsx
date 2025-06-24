@@ -157,6 +157,8 @@ export default function MessagesPage() {
   const [isNewChatDialogOpen, setIsNewChatDialogOpen] = useState(false);
   const [isParticipantsDialogOpen, setIsParticipantsDialogOpen] = useState(false);
   const [selectedAttachment, setSelectedAttachment] = useState<File | null>(null);
+  const [userSearch, setUserSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState<string>("all");
   
   // Получение списка чатов пользователя
   const { data: chats = [], isLoading: chatsLoading } = useQuery<Chat[]>({
@@ -183,8 +185,17 @@ export default function MessagesPage() {
   
   // Получение списка пользователей для создания чата
   const { data: chatUsers = [], isLoading: usersLoading } = useQuery<ChatUser[]>({
-    queryKey: ["/api/chat-users"],
+    queryKey: ["/api/chat-users", { search: userSearch, roleFilter }],
     enabled: !!user,
+    queryFn: async ({ queryKey }) => {
+      const [_url, params] = queryKey as [string, { search?: string; roleFilter?: string }];
+      const url = new URL(`/api/chat-users`, window.location.origin);
+      if (params.search) url.searchParams.set("search", params.search);
+      if (params.roleFilter && params.roleFilter !== "all") url.searchParams.set("roleFilter", params.roleFilter);
+      const res = await fetch(url.toString());
+      if (!res.ok) throw new Error("failed");
+      return res.json();
+    }
   });
   
   // Форма для отправки сообщений
@@ -1155,6 +1166,16 @@ export default function MessagesPage() {
               <form onSubmit={newChatForm.handleSubmit(onSubmitNewChat)}>
                 <TabsContent value={ChatTypeEnum.PRIVATE} className="space-y-4 mt-4">
                   <div className="space-y-4">
+                    <Input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="Поиск..." />
+                    <Select value={roleFilter} onValueChange={setRoleFilter}>
+                      <SelectTrigger><SelectValue placeholder="Все роли" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Все</SelectItem>
+                        <SelectItem value="teacher">Учитель</SelectItem>
+                        <SelectItem value="student">Ученик</SelectItem>
+                        <SelectItem value="parent">Родитель</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <FormField
                       control={newChatForm.control}
                       name="participantIds"
@@ -1219,6 +1240,16 @@ export default function MessagesPage() {
                   
                   <div>
                     <h4 className="text-sm font-medium mb-2">Выберите участников</h4>
+                    <Input value={userSearch} onChange={e => setUserSearch(e.target.value)} placeholder="Поиск..." className="mb-2" />
+                    <Select value={roleFilter} onValueChange={setRoleFilter}>
+                      <SelectTrigger><SelectValue placeholder="Все роли" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Все</SelectItem>
+                        <SelectItem value="teacher">Учитель</SelectItem>
+                        <SelectItem value="student">Ученик</SelectItem>
+                        <SelectItem value="parent">Родитель</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <div className="border rounded-md p-2 max-h-60 overflow-y-auto space-y-2">
                       {usersLoading ? (
                         <div className="flex justify-center items-center py-2">
