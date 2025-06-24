@@ -2369,6 +2369,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(gradedSubmission);
   });
 
+  app.delete("/api/homework-submissions/:id", hasRole([UserRoleEnum.STUDENT]), async (req, res) => {
+    const id = parseInt(req.params.id);
+
+    const submission = await dataStorage.getHomeworkSubmission(id);
+    if (!submission || submission.studentId !== req.user.id) {
+      return res.status(404).json({ message: "Submission not found" });
+    }
+
+    const deleted = await dataStorage.deleteHomeworkSubmission(id);
+
+    await dataStorage.createSystemLog({
+      userId: req.user.id,
+      action: "homework_submission_deleted",
+      details: `Deleted homework submission ${id}`,
+      ipAddress: req.ip
+    });
+
+    res.json(deleted);
+  });
+
   // Grades API
   app.get("/api/grades", isAuthenticated, async (req, res) => {
     // Добавляем отладочные логи
@@ -3756,7 +3776,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/documents", isAuthenticated, async (req, res) => {
     let documents = [];
     
-    if (req.query.schoolId) {
+    if (req.query.mine === 'true') {
+      documents = await dataStorage.getDocumentsByUploader(req.user.id);
+    } else if (req.query.schoolId) {
       const schoolId = parseInt(req.query.schoolId as string);
       documents = await dataStorage.getDocumentsBySchool(schoolId);
     } else if (req.query.classId) {
@@ -4893,6 +4915,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!isStudentInClass) {
           return res.status(403).json({ message: "Student does not belong to your class" });
         }
+      } else if (req.user.activeRole === UserRoleEnum.STUDENT && req.user.id === studentId) {
+        // Ученик может просматривать собственное расписание
       } else if (![UserRoleEnum.SUPER_ADMIN, UserRoleEnum.SCHOOL_ADMIN, UserRoleEnum.PRINCIPAL, UserRoleEnum.VICE_PRINCIPAL, UserRoleEnum.CLASS_TEACHER].includes(req.user.activeRole)) {
         // Только администраторы и классные руководители могут просматривать расписание учеников
         return res.status(403).json({ message: "You don't have permission to view student schedules" });
@@ -5039,7 +5063,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const studentId = parseInt(req.params.studentId);
       
-      // Проверяем права доступа - только классный руководитель, администраторы и родители могут просматривать расписание ученика
+      // Проверяем права доступа - классный руководитель, администраторы, родители
+      // или сам ученик могут просматривать расписание ученика
       const isClassTeacher = await userHasSpecificRole(req.user.id, UserRoleEnum.CLASS_TEACHER);
       if (isClassTeacher) {
         // Классный руководитель может видеть расписание только студентов своего класса

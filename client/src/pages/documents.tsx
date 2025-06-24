@@ -70,11 +70,64 @@ export default function DocumentsPage() {
   const [selectedClassId, setSelectedClassId] = useState<number | "all">("all");
   const [selectedSubjectId, setSelectedSubjectId] = useState<number | "all">("all");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+
+  if (user?.role === UserRoleEnum.STUDENT) {
+    return (
+      <MainLayout>
+        <div className="mb-4 flex justify-between items-center">
+          <h2 className="text-2xl font-bold">Мои файлы</h2>
+          <Button onClick={() => setIsAddDialogOpen(true)}>Загрузить</Button>
+        </div>
+        {isLoading ? (
+          <p>Загрузка...</p>
+        ) : (
+          <ul className="space-y-2">
+            {documents.map(doc => (
+              <li key={doc.id} className="flex justify-between items-center border p-2 rounded-md">
+                <span>{doc.title}</span>
+                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer" className="text-primary">Скачать</a>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Загрузить файл</DialogTitle>
+            </DialogHeader>
+            <Input type="file" onChange={async e => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              if (file.size > 3 * 1024 * 1024 * 1024) {
+                toast({ title: 'Файл слишком большой', variant: 'destructive' });
+                return;
+              }
+              const fd = new FormData();
+              fd.append('file', file);
+              fd.append('title', file.name);
+              const res = await fetch('/api/documents/upload', { method: 'POST', body: fd });
+              const data = await res.json();
+              await fetch('/api/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: file.name, fileUrl: data.file.fileUrl }) });
+              queryClient.invalidateQueries({ queryKey: ['/api/documents?mine=true'] });
+              setIsAddDialogOpen(false);
+            }} />
+          </DialogContent>
+        </Dialog>
+      </MainLayout>
+    );
+  }
   
   // Fetch documents
   const { data: documents = [], isLoading } = useQuery<Document[]>({
-    queryKey: ["/api/documents"],
-    enabled: !!user
+    queryKey: [user?.role === UserRoleEnum.STUDENT ? "/api/documents?mine=true" : "/api/documents"],
+    enabled: !!user,
+    queryFn: async ({ queryKey }) => {
+      const url = typeof queryKey[0] === 'string' ? queryKey[0] : "/api/documents";
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('failed');
+      return res.json();
+    }
   });
   
   // Fetch schools

@@ -370,7 +370,7 @@ export default function StudentGrades() {
     };
     
     const academicYear = getAcademicYear(currentYear);
-    
+
     switch (displayPeriod) {
       case 'quarter1': // 1 четверть: сентябрь - октябрь
         start = new Date(academicYear, 8, 1); // 1 сентября
@@ -414,6 +414,12 @@ export default function StudentGrades() {
         label = `Учебный год ${academicYear}-${academicYear + 1}`;
         break;
 
+      case 'month':
+        start = startOfMonth(currentMonth);
+        end = endOfMonth(currentMonth);
+        label = format(currentMonth, 'LLLL yyyy', { locale: ru });
+        break;
+
       default:
         start = new Date(academicYear, 8, 1);
         end = new Date(academicYear, 9, 31);
@@ -425,7 +431,7 @@ export default function StudentGrades() {
       endDate: end, 
       periodLabel: label 
     };
-  }, [currentYear, displayPeriod]);
+  }, [currentYear, displayPeriod, currentMonth]);
   
   // Определяем дни текущего периода
   const daysInPeriod = useMemo(() => {
@@ -873,27 +879,28 @@ export default function StudentGrades() {
     );
   };
   
-  // Переключение на предыдущий месяц
-  // Переключение на предыдущий учебный год
-  const goToPreviousYear = () => {
-    setCurrentYear(prevYear => prevYear - 1);
+  const goToPreviousPeriod = () => {
+    if (displayPeriod === 'month') {
+      setCurrentMonth(prev => subMonths(prev, 1));
+    } else {
+      setCurrentYear(prevYear => prevYear - 1);
+    }
   };
-  
-  // Переключение на следующий учебный год
-  const goToNextYear = () => {
-    const nextYear = currentYear + 1;
-    const currentDate = new Date();
-    
-    // Не позволяем выбирать будущие учебные годы
-    // Если текущий месяц сентябрь или позже, то можно выбрать текущий год
-    // Иначе можно выбрать только до предыдущего года
-    const currentMonth = currentDate.getMonth();
-    const maxAllowedYear = currentMonth >= 8 
-      ? currentDate.getFullYear() 
-      : currentDate.getFullYear() - 1;
-      
-    if (nextYear <= maxAllowedYear) {
-      setCurrentYear(nextYear);
+
+  const goToNextPeriod = () => {
+    if (displayPeriod === 'month') {
+      setCurrentMonth(prev => addMonths(prev, 1));
+    } else {
+      const nextYear = currentYear + 1;
+      const currentDate = new Date();
+      const currentM = currentDate.getMonth();
+      const maxAllowedYear = currentM >= 8
+        ? currentDate.getFullYear()
+        : currentDate.getFullYear() - 1;
+
+      if (nextYear <= maxAllowedYear) {
+        setCurrentYear(nextYear);
+      }
     }
   };
   
@@ -1130,16 +1137,17 @@ export default function StudentGrades() {
               <SelectItem value="quarter4">4 четверть</SelectItem>
               <SelectItem value="semester1">1 полугодие</SelectItem>
               <SelectItem value="semester2">2 полугодие</SelectItem>
+              <SelectItem value="month">Месяц</SelectItem>
               <SelectItem value="year">Учебный год</SelectItem>
             </SelectContent>
           </Select>
           
           {/* Навигация по периодам */}
           <div className="flex items-center space-x-2 border rounded-md p-1">
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               size="icon"
-              onClick={goToPreviousYear}
+              onClick={goToPreviousPeriod}
               className="h-7 w-7"
               disabled={hasBlockingErrors}
             >
@@ -1156,7 +1164,7 @@ export default function StudentGrades() {
           <Button
             variant="ghost"
             size="icon"
-            onClick={goToNextYear}
+            onClick={goToNextPeriod}
             className="h-7 w-7"
           >
             <ChevronRight className="h-4 w-4" />
@@ -1363,6 +1371,9 @@ export default function StudentGrades() {
           
           {selectedGrade && (
             <div className="space-y-6">
+              <div className="text-center text-xl font-semibold">
+                {selectedGrade.grade}/{selectedAssignment?.maxScore ?? '-'}
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <div className="text-sm text-gray-500">Предмет</div>

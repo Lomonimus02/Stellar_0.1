@@ -55,6 +55,7 @@ const profileFormSchema = z.object({
   lastName: z.string().min(1, "Фамилия обязательна"),
   email: z.string().email("Введите корректный email"),
   phone: z.string().optional(),
+  avatarUrl: z.string().optional(),
 });
 
 // Schema for password change
@@ -292,6 +293,28 @@ export default function SettingsPage() {
                     onSubmit={profileForm.handleSubmit(onProfileSubmit)}
                     className="space-y-5"
                   >
+                    <FormField
+                      control={profileForm.control}
+                      name="avatarUrl"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-slate-700 font-medium text-sm">Аватар</FormLabel>
+                          <FormControl>
+                            <Input type="file" onChange={async e => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const fd = new FormData();
+                              fd.append('file', file);
+                              fd.append('title', file.name);
+                              const res = await fetch('/api/documents/upload', { method: 'POST', body: fd });
+                              const data = await res.json();
+                              field.onChange(data.file.fileUrl);
+                            }} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                       <FormField
                         control={profileForm.control}

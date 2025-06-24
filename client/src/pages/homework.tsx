@@ -98,7 +98,7 @@ export default function HomeworkPage() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isSubmitDialogOpen, setIsSubmitDialogOpen] = useState(false);
   const [selectedHomework, setSelectedHomework] = useState<Homework | null>(null);
-  const [currentTab, setCurrentTab] = useState("active");
+  const [currentTab, setCurrentTab] = useState("undone");
 
   // Determine if the user can create homework (only teachers)
   const canCreateHomework = user?.role === UserRoleEnum.TEACHER;
@@ -120,6 +120,11 @@ export default function HomeworkPage() {
   // Fetch subjects
   const { data: subjects = [] } = useQuery<Subject[]>({
     queryKey: ["/api/subjects"],
+    enabled: !!user
+  });
+
+  const { data: teachers = [] } = useQuery<User[]>({
+    queryKey: ["/api/users", { role: "teacher" }],
     enabled: !!user
   });
 
@@ -279,6 +284,22 @@ export default function HomeworkPage() {
     },
   });
 
+  const deleteSubmissionMutation = useMutation({
+    mutationFn: async (submissionId: number) => {
+      const res = await apiRequest(`/api/homework-submissions/${submissionId}`, "DELETE");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/homework-submissions"] });
+      setIsSubmitDialogOpen(false);
+      setSelectedHomework(null);
+      toast({ title: "Статус обновлен" });
+    },
+    onError: (err: any) => {
+      toast({ title: "Ошибка", description: err.message, variant: "destructive" });
+    }
+  });
+
   const onSubmitHomework = (values: z.infer<typeof homeworkFormSchema>) => {
     createHomeworkMutation.mutate(values);
   };
@@ -305,17 +326,11 @@ export default function HomeworkPage() {
       hw.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       hw.description.toLowerCase().includes(searchQuery.toLowerCase());
     
-    // Filter by status (active/completed)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dueDate = new Date(hw.dueDate);
-    dueDate.setHours(0, 0, 0, 0);
-    
-    const isPastDue = dueDate < today;
-    const isActive = currentTab === "active" && !isPastDue;
-    const isCompleted = currentTab === "completed" && isPastDue;
-    
-    return classMatches && subjectMatches && searchMatches && (isActive || isCompleted);
+    const isSubmitted = isHomeworkSubmitted(hw.id);
+    const isDone = currentTab === "done" && isSubmitted;
+    const isUndone = currentTab === "undone" && !isSubmitted;
+
+    return classMatches && subjectMatches && searchMatches && (isDone || isUndone);
   });
 
   // Helper functions to get names
@@ -327,6 +342,11 @@ export default function HomeworkPage() {
   const getSubjectName = (id: number) => {
     const subject = subjects.find(s => s.id === id);
     return subject ? subject.name : `Предмет ${id}`;
+  };
+
+  const getTeacherName = (id: number) => {
+    const teacher = teachers.find(t => t.id === id);
+    return teacher ? `${teacher.lastName} ${teacher.firstName}` : `Учитель ${id}`;
   };
 
   // Check if homework is submitted by student
@@ -402,11 +422,11 @@ export default function HomeworkPage() {
         </Select>
       </div>
 
-      {/* Tabs for Active/Completed */}
-      <Tabs defaultValue="active" value={currentTab} onValueChange={setCurrentTab} className="mb-6">
+      {/* Tabs for Done/Undone */}
+      <Tabs defaultValue="undone" value={currentTab} onValueChange={setCurrentTab} className="mb-6">
         <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="active">Активные</TabsTrigger>
-          <TabsTrigger value="completed">Завершенные</TabsTrigger>
+          <TabsTrigger value="undone">Невыполненные</TabsTrigger>
+          <TabsTrigger value="done">Выполненные</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -420,7 +440,7 @@ export default function HomeworkPage() {
         <div className="text-center py-12 bg-white rounded-lg shadow-sm">
           <CalendarIcon className="h-12 w-12 text-gray-300 mx-auto" />
           <p className="mt-4 text-gray-500">
-            {currentTab === "active" ? "Нет активных домашних заданий" : "Нет завершенных домашних заданий"}
+            {currentTab === "undone" ? "Нет невыполненных заданий" : "Нет выполненных заданий"}
           </p>
         </div>
       ) : (
@@ -432,7 +452,7 @@ export default function HomeworkPage() {
             const isSubmitted = canSubmitHomework && isHomeworkSubmitted(hw.id);
             
             return (
-              <Card key={hw.id} className={isPastDue ? "opacity-70" : ""}>
+              <Card key={hw.id} className={isPastDue ? "opacity-70" : ""} onClick={() => {setSelectedHomework(hw); setIsSubmitDialogOpen(true);}}>
                 <CardHeader>
                   <div className="flex justify-between items-start">
                     <CardTitle className="text-xl">{hw.title}</CardTitle>
@@ -491,7 +511,7 @@ export default function HomeworkPage() {
                     </div>
                   </div>
                   <CardDescription className="flex justify-between">
-                    <span>{getClassName(hw.classId)} • {getSubjectName(hw.subjectId)}</span>
+                    <span>{getClassName(hw.classId)} • {getSubjectName(hw.subjectId)} • {getTeacherName(hw.teacherId)}</span>
                     {isSubmitted && (
                       <Badge className="bg-green-100 text-green-800 hover:bg-green-200">
                         <CheckCircle className="mr-1 h-3 w-3" /> Выполнено
@@ -891,70 +911,43 @@ export default function HomeworkPage() {
         </AlertDialogContent>
       </AlertDialog>
       
-      {/* Submit Homework Dialog */}
+      {/* Homework Details Dialog */}
       <Dialog open={isSubmitDialogOpen} onOpenChange={setIsSubmitDialogOpen}>
-        <DialogContent className="sm:max-w-[550px]">
+        <DialogContent className="sm:max-w-[450px]">
           <DialogHeader>
-            <DialogTitle>Отправить ответ на задание</DialogTitle>
+            <DialogTitle>{selectedHomework?.title}</DialogTitle>
             <DialogDescription>
-              {selectedHomework && (
-                <span className="text-primary font-medium">
-                  {selectedHomework.title}
-                </span>
-              )}
+              {selectedHomework?.description}
             </DialogDescription>
           </DialogHeader>
-          
-          <Form {...submissionForm}>
-            <form onSubmit={submissionForm.handleSubmit(onSubmitSubmission)} className="space-y-4">
-              <FormField
-                control={submissionForm.control}
-                name="submissionText"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Текст ответа</FormLabel>
-                    <FormControl>
-                      <Textarea 
-                        placeholder="Введите ваш ответ на задание" 
-                        className="min-h-[150px]"
-                        {...field} 
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={submissionForm.control}
-                name="fileUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Прикрепить файл (необязательно)</FormLabel>
-                    <FormControl>
-                      <div className="flex items-center space-x-2">
-                        <Input 
-                          type="text"
-                          placeholder="Ссылка на файл или документ" 
-                          {...field} 
-                        />
-                        <Button type="button" variant="outline" size="icon">
-                          <FileUpIcon className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <DialogFooter>
-                <Button type="submit" disabled={submitHomeworkMutation.isPending}>
-                  {submitHomeworkMutation.isPending ? 'Отправка...' : 'Отправить ответ'}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
+
+          {selectedHomework && (
+            <div className="space-y-4">
+              <p>Срок сдачи: {format(new Date(selectedHomework.dueDate), 'd MMMM yyyy', { locale: ru })}</p>
+              <p>Учитель: {getTeacherName(selectedHomework.teacherId)}</p>
+            </div>
+          )}
+
+          <DialogFooter>
+            {selectedHomework && isHomeworkSubmitted(selectedHomework.id) ? (
+              <Button
+                disabled={deleteSubmissionMutation.isPending}
+                onClick={() => {
+                  const sub = submissions.find(s => s.homeworkId === selectedHomework.id);
+                  if (sub) deleteSubmissionMutation.mutate(sub.id);
+                }}
+              >
+                Отменить выполнение
+              </Button>
+            ) : (
+              <Button
+                disabled={submitHomeworkMutation.isPending}
+                onClick={() => submitHomeworkMutation.mutate({ homeworkId: selectedHomework!.id, submissionText: '', fileUrl: '' })}
+              >
+                Отметить выполненным
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </MainLayout>

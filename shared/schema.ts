@@ -23,6 +23,7 @@ export const users = pgTable("users", {
   lastName: text("last_name").notNull(),
   email: text("email").notNull(),
   phone: text("phone"),
+  avatarUrl: text("avatar_url"),
   // Текущая активная роль, выбранная пользователем
   activeRole: text("active_role").$type<UserRoleEnum>(),
   schoolId: integer("school_id"),

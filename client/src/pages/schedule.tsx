@@ -94,8 +94,14 @@ export default function SchedulePage() {
   
   // Fetch schedules
   const { data: schedules = [], isLoading } = useQuery<ScheduleType[]>({
-    queryKey: ["/api/schedules"],
-    enabled: !!user
+    queryKey: [user?.role === UserRoleEnum.STUDENT ? `/api/student-schedules/${user.id}` : "/api/schedules"],
+    enabled: !!user,
+    queryFn: async () => {
+      const url = user?.role === UserRoleEnum.STUDENT ? `/api/student-schedules/${user.id}` : "/api/schedules";
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to load schedules');
+      return res.json();
+    }
   });
   
   // Filter schedules for teacher

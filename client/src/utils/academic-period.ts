@@ -2,7 +2,15 @@
  * Утилиты для работы с учебными периодами
  */
 
-export type QuarterType = 'quarter1' | 'quarter2' | 'quarter3' | 'quarter4' | 'semester1' | 'semester2' | 'year';
+export type QuarterType =
+  | 'quarter1'
+  | 'quarter2'
+  | 'quarter3'
+  | 'quarter4'
+  | 'semester1'
+  | 'semester2'
+  | 'year'
+  | 'month';
 
 /**
  * Получает учебный год на основе переданного года

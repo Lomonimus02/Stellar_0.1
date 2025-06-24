@@ -509,6 +509,13 @@ export class DatabaseStorage implements IStorage {
     return updatedSubmission;
   }
 
+  async deleteHomeworkSubmission(id: number): Promise<HomeworkSubmission | undefined> {
+    const [deleted] = await db.delete(homeworkSubmissions)
+      .where(eq(homeworkSubmissions.id, id))
+      .returning();
+    return deleted;
+  }
+
   // ===== Grade operations =====
   async getGrade(id: number): Promise<Grade | undefined> {
     const result = await db.select().from(grades).where(eq(grades.id, id)).limit(1);
@@ -639,6 +646,11 @@ export class DatabaseStorage implements IStorage {
   async getDocumentsBySubject(subjectId: number): Promise<Document[]> {
     const docs = await db.select().from(documents).where(eq(documents.subjectId, subjectId));
     // Расшифровываем документы
+    return decryptDocuments(docs);
+  }
+
+  async getDocumentsByUploader(userId: number): Promise<Document[]> {
+    const docs = await db.select().from(documents).where(eq(documents.uploaderId, userId));
     return decryptDocuments(docs);
   }
 
