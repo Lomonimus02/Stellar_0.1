@@ -1,0 +1,62 @@
+Decryption error: Error: error:1C80006B:Provider routines::wrong final block length
+    at Decipheriv.final (node:internal/crypto/cipher:193:29)
+    at decrypt (/home/runner/workspace/server/utils/encryption.ts:127:27)
+    at decryptField (/home/runner/workspace/shared/encryption-wrappers.ts:20:10)
+    at decryptModel (/home/runner/workspace/shared/encryption-wrappers.ts:39:31)
+    at decryptUser (/home/runner/workspace/server/utils/encrypted-models.ts:23:10)
+    at DatabaseStorage.getUser (/home/runner/workspace/server/db-storage.ts:100:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async <anonymous> (/home/runner/workspace/server/auth.ts:73:20) {
+  library: 'Provider routines',
+  reason: 'wrong final block length',
+  code: 'ERR_OSSL_WRONG_FINAL_BLOCK_LENGTH'
+}
+Error during user deserialization: Error: Failed to decrypt data
+    at decrypt (/home/runner/workspace/server/utils/encryption.ts:131:11)
+    at decryptField (/home/runner/workspace/shared/encryption-wrappers.ts:20:10)
+    at decryptModel (/home/runner/workspace/shared/encryption-wrappers.ts:39:31)
+    at decryptUser (/home/runner/workspace/server/utils/encrypted-models.ts:23:10)
+    at DatabaseStorage.getUser (/home/runner/workspace/server/db-storage.ts:100:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async <anonymous> (/home/runner/workspace/server/auth.ts:73:20)
+Server error: Error: Failed to decrypt data
+    at decrypt (/home/runner/workspace/server/utils/encryption.ts:131:11)
+    at decryptField (/home/runner/workspace/shared/encryption-wrappers.ts:20:10)
+    at decryptModel (/home/runner/workspace/shared/encryption-wrappers.ts:39:31)
+    at decryptUser (/home/runner/workspace/server/utils/encrypted-models.ts:23:10)
+    at DatabaseStorage.getUser (/home/runner/workspace/server/db-storage.ts:100:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async <anonymous> (/home/runner/workspace/server/auth.ts:73:20)
+6:14:27 PM [express] GET /api/user 401 in 2ms
+6:14:31 PM [express] GET /api/user 401 in 0ms
+Decryption error: Error: error:1C80006B:Provider routines::wrong final block length
+    at Decipheriv.final (node:internal/crypto/cipher:193:29)
+    at decrypt (/home/runner/workspace/server/utils/encryption.ts:127:27)
+    at decryptField (/home/runner/workspace/shared/encryption-wrappers.ts:20:10)
+    at decryptModel (/home/runner/workspace/shared/encryption-wrappers.ts:39:31)
+    at decryptUser (/home/runner/workspace/server/utils/encrypted-models.ts:23:10)
+    at DatabaseStorage.getUserByUsername (/home/runner/workspace/server/db-storage.ts:105:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async Strategy._verify (/home/runner/workspace/server/auth.ts:61:20) {
+  library: 'Provider routines',
+  reason: 'wrong final block length',
+  code: 'ERR_OSSL_WRONG_FINAL_BLOCK_LENGTH'
+}
+Unhandled rejection at: Promise {
+  <rejected> Error: Failed to decrypt data
+      at decrypt (/home/runner/workspace/server/utils/encryption.ts:131:11)
+      at decryptField (/home/runner/workspace/shared/encryption-wrappers.ts:20:10)
+      at decryptModel (/home/runner/workspace/shared/encryption-wrappers.ts:39:31)
+      at decryptUser (/home/runner/workspace/server/utils/encrypted-models.ts:23:10)
+      at DatabaseStorage.getUserByUsername (/home/runner/workspace/server/db-storage.ts:105:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at async Strategy._verify (/home/runner/workspace/server/auth.ts:61:20)
+} reason: Error: Failed to decrypt data
+    at decrypt (/home/runner/workspace/server/utils/encryption.ts:131:11)
+    at decryptField (/home/runner/workspace/shared/encryption-wrappers.ts:20:10)
+    at decryptModel (/home/runner/workspace/shared/encryption-wrappers.ts:39:31)
+    at decryptUser (/home/runner/workspace/server/utils/encrypted-models.ts:23:10)
+    at DatabaseStorage.getUserByUsername (/home/runner/workspace/server/db-storage.ts:105:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async Strategy._verify (/home/runner/workspace/server/auth.ts:61:20)
+Database connection closed
