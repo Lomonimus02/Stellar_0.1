@@ -12,14 +12,33 @@ const encryptedDir = path.join(uploadDir, 'encrypted');
 const tempDir = path.join(uploadDir, 'temp');
 
 // Создаем директории, если они не существуют
+console.log('Initializing upload directories...');
+console.log('Upload dir:', uploadDir);
+console.log('Encrypted dir:', encryptedDir);
+console.log('Temp dir:', tempDir);
+
 if (!existsSync(uploadDir)) {
+  console.log('Creating upload directory...');
   mkdirSync(uploadDir, { recursive: true });
+  console.log('Upload directory created');
+} else {
+  console.log('Upload directory already exists');
 }
+
 if (!existsSync(encryptedDir)) {
+  console.log('Creating encrypted directory...');
   mkdirSync(encryptedDir, { recursive: true });
+  console.log('Encrypted directory created');
+} else {
+  console.log('Encrypted directory already exists');
 }
+
 if (!existsSync(tempDir)) {
+  console.log('Creating temp directory...');
   mkdirSync(tempDir, { recursive: true });
+  console.log('Temp directory created');
+} else {
+  console.log('Temp directory already exists');
 }
 
 // Настройка хранилища
@@ -94,37 +113,81 @@ export function getFileUrl(filename: string, isEncrypted: boolean = false): stri
 // Функция для перемещения загруженного файла из временной директории в постоянную
 // с опциональным шифрованием
 export async function moveUploadedFile(
-  tempFilePath: string, 
+  tempFilePath: string,
   encrypt: boolean = false
 ): Promise<{ filename: string, isEncrypted: boolean }> {
+  console.log('=== moveUploadedFile started ===');
+  console.log('Temp file path:', tempFilePath);
+  console.log('Encrypt:', encrypt);
+
   try {
+    // Проверяем, существует ли временный файл
+    try {
+      await fs.access(tempFilePath);
+      console.log('Temp file exists');
+    } catch (accessError) {
+      console.error('Temp file does not exist:', tempFilePath);
+      throw new Error(`Temp file not found: ${tempFilePath}`);
+    }
+
     const filename = path.basename(tempFilePath);
-    
+    console.log('Extracted filename:', filename);
+
     if (encrypt) {
+      console.log('Encrypting file...');
       // Если шифрование включено, сохраняем зашифрованный файл в директорию encrypted
       const encryptedFilePath = path.join(encryptedDir, filename);
+      console.log('Encrypted file path:', encryptedFilePath);
+
+      // Проверяем, существует ли директория для зашифрованных файлов
+      try {
+        await fs.access(encryptedDir);
+        console.log('Encrypted directory exists');
+      } catch (dirError) {
+        console.log('Creating encrypted directory...');
+        await fs.mkdir(encryptedDir, { recursive: true });
+      }
+
       await encryptFile(tempFilePath, encryptedFilePath);
-      
+      console.log('File encrypted successfully');
+
       // Удаляем временный файл
       await fs.unlink(tempFilePath);
-      
+      console.log('Temp file deleted');
+
       return {
         filename,
         isEncrypted: true
       };
     } else {
+      console.log('Moving file without encryption...');
       // Просто перемещаем файл из временной директории в основную
       const finalFilePath = path.join(uploadDir, filename);
+      console.log('Final file path:', finalFilePath);
+
       await fs.rename(tempFilePath, finalFilePath);
-      
+      console.log('File moved successfully');
+
       return {
         filename,
         isEncrypted: false
       };
     }
   } catch (error) {
-    console.error('Error processing uploaded file:', error);
-    throw new Error('Failed to process uploaded file');
+    console.error('=== Error in moveUploadedFile ===');
+    console.error('Error details:', error);
+    console.error('Error stack:', error.stack);
+
+    // Пытаемся очистить временный файл в случае ошибки
+    try {
+      await fs.access(tempFilePath);
+      await fs.unlink(tempFilePath);
+      console.log('Cleaned up temp file after error');
+    } catch (cleanupError) {
+      console.error('Failed to cleanup temp file:', cleanupError);
+    }
+
+    throw new Error(`Failed to process uploaded file: ${error.message}`);
   }
 }
 

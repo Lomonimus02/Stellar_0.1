@@ -17,16 +17,19 @@ import {
   X,
   Search,
   Check,
-  Loader2
+  Loader2,
+  Filter
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import { formatUserRoles, getAvailableRoles, userHasAnyRole, getRoleLabel, UserWithRolesCompat } from "@/utils/user-roles";
 
-interface ChatUser {
-  id: number;
-  firstName: string;
-  lastName: string;
+interface ChatUser extends UserWithRolesCompat {
   username: string;
-  role: string;
-  avatarUrl?: string;
 }
 
 interface AddParticipantsDialogProps {
@@ -50,15 +53,27 @@ export function AddParticipantsDialog({
 }: AddParticipantsDialogProps) {
   const [selectedUsers, setSelectedUsers] = useState<ChatUser[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
 
   // Фильтруем пользователей, которых можно добавить
-  const usersToAdd = availableUsers.filter(user =>
-    user.id !== currentUserId &&
-    !currentParticipants.some(p => p.id === user.id) &&
-    (user.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-     user.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-     user.username.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const usersToAdd = availableUsers.filter(user => {
+    // Исключаем текущего пользователя и уже добавленных участников
+    if (user.id === currentUserId || currentParticipants.some(p => p.id === user.id)) {
+      return false;
+    }
+
+    // Фильтр по поисковому запросу
+    const matchesSearch = !searchQuery ||
+      user.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      user.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      user.username.toLowerCase().includes(searchQuery.toLowerCase());
+
+    // Фильтр по выбранным ролям (поддержка множественных ролей)
+    const matchesRole = selectedRoles.length === 0 ||
+                       userHasAnyRole(user, selectedRoles);
+
+    return matchesSearch && matchesRole;
+  });
 
   const handleUserToggle = (user: ChatUser) => {
     setSelectedUsers(prev => {
@@ -79,9 +94,13 @@ export function AddParticipantsDialog({
     }
   };
 
+  // Получение уникальных ролей для фильтра
+  const availableRoles = getAvailableRoles(availableUsers, currentUserId);
+
   const handleClose = () => {
     setSelectedUsers([]);
     setSearchQuery("");
+    setSelectedRoles([]);
     onClose();
   };
 
@@ -95,15 +114,69 @@ export function AddParticipantsDialog({
           </DialogTitle>
         </DialogHeader>
 
-        {/* Поиск */}
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-          <Input
-            placeholder="Поиск пользователей..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-white/80 border-gray-300/50 focus:border-primary/50 focus:ring-primary/20 rounded-xl"
-          />
+        {/* Поиск и фильтры */}
+        <div className="flex gap-2 mb-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <Input
+              placeholder="Поиск пользователей..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 bg-white/80 border-gray-300/50 focus:border-primary/50 focus:ring-primary/20 rounded-xl"
+            />
+          </div>
+
+          {/* Фильтр по ролям */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-white/80 border-gray-300/50 hover:bg-gray-50/80 rounded-xl"
+              >
+                <Filter className="h-4 w-4 mr-2" />
+                Роли
+                {selectedRoles.length > 0 && (
+                  <Badge variant="secondary" className="ml-2 h-5 px-1.5 text-xs">
+                    {selectedRoles.length}
+                  </Badge>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <div className="px-2 py-1.5 text-sm font-semibold">Фильтр по ролям</div>
+              {availableRoles.map(role => {
+                const label = getRoleLabel(role);
+
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={role}
+                    checked={selectedRoles.includes(role)}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setSelectedRoles([...selectedRoles, role]);
+                      } else {
+                        setSelectedRoles(selectedRoles.filter(r => r !== role));
+                      }
+                    }}
+                  >
+                    {label}
+                  </DropdownMenuCheckboxItem>
+                );
+              })}
+              {selectedRoles.length > 0 && (
+                <>
+                  <div className="border-t my-1" />
+                  <button
+                    className="w-full px-2 py-1.5 text-sm text-left hover:bg-gray-100 rounded"
+                    onClick={() => setSelectedRoles([])}
+                  >
+                    Очистить фильтры
+                  </button>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Выбранные пользователи */}
@@ -151,31 +224,13 @@ export function AddParticipantsDialog({
               usersToAdd.map(user => {
                 const isSelected = selectedUsers.some(u => u.id === user.id);
                 return (
-                  <div
+                  <UserCard
                     key={user.id}
+                    user={user}
+                    isSelected={isSelected}
                     onClick={() => handleUserToggle(user)}
-                    className={`flex items-center p-3 rounded-xl cursor-pointer transition-all duration-200 hover:bg-gray-50 ${
-                      isSelected ? 'bg-primary/5 ring-2 ring-primary/20' : ''
-                    }`}
-                  >
-                    <Avatar className="h-12 w-12 mr-3">
-                      <AvatarImage src={user.avatarUrl} alt={`${user.firstName} ${user.lastName}`} />
-                      <AvatarFallback className="bg-gray-200 text-gray-700 font-semibold">
-                        {user.firstName.charAt(0)}{user.lastName.charAt(0)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <p className="font-semibold text-gray-900">
-                        {user.firstName} {user.lastName}
-                      </p>
-                      <p className="text-xs text-gray-500">Будет добавлен как пользователь</p>
-                    </div>
-                    {isSelected && (
-                      <div className="w-6 h-6 bg-primary rounded-full flex items-center justify-center">
-                        <Check className="h-4 w-4 text-white" />
-                      </div>
-                    )}
-                  </div>
+                    showCheckmark={true}
+                  />
                 );
               })
             )}

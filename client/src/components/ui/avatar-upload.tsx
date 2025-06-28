@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 
 interface AvatarUploadProps {
   value?: string | null;
-  onChange: (url: string | null) => void;
+  onChange: (url: string | null, tempAvatarId?: string) => void;
   fallback?: string;
   className?: string;
   size?: "sm" | "md" | "lg";
@@ -23,6 +23,7 @@ export function AvatarUpload({
   disabled = false
 }: AvatarUploadProps) {
   const [isUploading, setIsUploading] = useState(false);
+  const [tempAvatarId, setTempAvatarId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -59,6 +60,8 @@ export function AvatarUpload({
     setIsUploading(true);
 
     try {
+      console.log('Starting file upload:', file.name, file.type, file.size);
+
       const formData = new FormData();
       formData.append('file', file);
 
@@ -67,12 +70,27 @@ export function AvatarUpload({
         body: formData,
       });
 
+      console.log('Upload response status:', response.status);
+
       if (!response.ok) {
-        throw new Error('Ошибка загрузки файла');
+        const errorText = await response.text();
+        console.error('Upload failed with status:', response.status, 'Error:', errorText);
+        throw new Error(`Ошибка загрузки файла: ${response.status}`);
       }
 
       const data = await response.json();
-      onChange(data.fileUrl);
+      console.log('Upload response data:', data);
+
+      if (!data.fileUrl || !data.tempAvatarId) {
+        console.error('Missing fileUrl or tempAvatarId in response:', data);
+        throw new Error('Сервер не вернул необходимые данные');
+      }
+
+      // Сохраняем ID временной аватарки
+      setTempAvatarId(data.tempAvatarId);
+
+      // Передаем URL и ID временной аватарки
+      onChange(data.fileUrl, data.tempAvatarId);
 
       toast({
         title: "Успешно",
@@ -82,7 +100,7 @@ export function AvatarUpload({
       console.error('Upload error:', error);
       toast({
         title: "Ошибка",
-        description: "Не удалось загрузить изображение",
+        description: error instanceof Error ? error.message : "Не удалось загрузить изображение",
         variant: "destructive",
       });
     } finally {
@@ -95,6 +113,7 @@ export function AvatarUpload({
   };
 
   const handleRemove = () => {
+    setTempAvatarId(null);
     onChange(null);
   };
 

@@ -24,7 +24,8 @@ import {
   ArrowLeft,
   Loader2,
   MessageCircle,
-  Edit3
+  Edit3,
+  Crown
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -147,12 +148,15 @@ type MessageFormValues = z.infer<typeof messageFormSchema>;
 
 // Схема для создания нового чата
 const newChatFormSchema = z.object({
-  name: z.string().min(1, "Введите название чата"),
+  name: z.string()
+    .min(1, "Введите название чата")
+    .refine((name) => name.trim().length >= 2, "Название должно содержать не менее 2 символов")
+    .refine((name) => name.trim().length <= 50, "Название не должно превышать 50 символов"),
   type: z.enum(["private", "group"], {
     required_error: "Выберите тип чата",
   }),
   participantIds: z.array(z.number()).min(1, "Добавьте хотя бы одного участника"),
-  avatarUrl: z.string().nullable().optional(),
+  tempAvatarId: z.string().nullable().optional(),
 });
 
 type NewChatFormValues = z.infer<typeof newChatFormSchema>;
@@ -259,26 +263,80 @@ export default function MessagesPage() {
         // Загружаем файл на сервер
         const formData = new FormData();
         formData.append('file', data.attachmentFile);
-        
+
+        console.log('=== Starting file upload ===');
+        console.log('Chat ID:', data.chatId);
+        console.log('File info:', {
+          name: data.attachmentFile.name,
+          size: data.attachmentFile.size,
+          type: data.attachmentFile.type
+        });
+
         try {
           const uploadResponse = await fetch(`/api/chats/${data.chatId}/upload`, {
             method: 'POST',
             body: formData,
             credentials: 'include'
           });
-          
+
+          console.log('Upload response status:', uploadResponse.status);
+          console.log('Upload response headers:', Object.fromEntries(uploadResponse.headers.entries()));
+
           if (!uploadResponse.ok) {
-            throw new Error('Не удалось загрузить файл');
+            let errorMessage = 'Не удалось загрузить файл';
+            try {
+              const errorData = await uploadResponse.json();
+              console.error('Server error response:', errorData);
+              errorMessage = errorData.message || errorMessage;
+              if (errorData.details) {
+                console.error('Error details:', errorData.details);
+              }
+            } catch (parseError) {
+              console.error('Failed to parse error response:', parseError);
+              const errorText = await uploadResponse.text();
+              console.error('Raw error response:', errorText);
+              errorMessage = `HTTP ${uploadResponse.status}: ${uploadResponse.statusText}`;
+            }
+            throw new Error(errorMessage);
           }
-          
+
           const uploadResult = await uploadResponse.json();
+          console.log('Upload result:', uploadResult);
+
+          if (!uploadResult.success || !uploadResult.file) {
+            console.error('Invalid upload result:', uploadResult);
+            throw new Error('Сервер вернул некорректный ответ');
+          }
+
           attachmentUrl = uploadResult.file.url;
           attachmentType = uploadResult.file.type;
-          
-          console.log('Файл успешно загружен:', uploadResult);
+
+          console.log('Файл успешно загружен:', {
+            url: attachmentUrl,
+            type: attachmentType,
+            filename: uploadResult.file.filename
+          });
+
         } catch (error) {
-          console.error('Ошибка при загрузке файла:', error);
-          throw new Error('Не удалось загрузить файл: ' + (error.message || 'неизвестная ошибка'));
+          console.error('=== File upload error ===');
+          console.error('Error details:', error);
+
+          // Проверяем тип ошибки для более точного сообщения
+          let userMessage = 'Не удалось загрузить файл';
+
+          if (error instanceof TypeError && error.message.includes('fetch')) {
+            userMessage = 'Ошибка сети. Проверьте подключение к интернету.';
+          } else if (error.message.includes('401')) {
+            userMessage = 'Ошибка авторизации. Попробуйте войти в систему заново.';
+          } else if (error.message.includes('403')) {
+            userMessage = 'У вас нет прав для загрузки файлов в этот чат.';
+          } else if (error.message.includes('413')) {
+            userMessage = 'Файл слишком большой. Максимальный размер: 10 МБ.';
+          } else if (error.message) {
+            userMessage = error.message;
+          }
+
+          throw new Error(userMessage);
         }
       }
       
@@ -511,13 +569,42 @@ export default function MessagesPage() {
     type: ChatTypeEnum;
     participantIds: number[];
     name?: string;
-    avatarUrl?: string | null;
+    tempAvatarId?: string | null;
   }) => {
+    // Дополнительная валидация для групповых чатов
+    if (data.type === ChatTypeEnum.GROUP) {
+      const trimmedName = (data.name || '').trim();
+      if (!trimmedName) {
+        toast({
+          title: "Ошибка",
+          description: "Название группового чата обязательно",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (trimmedName.length < 2) {
+        toast({
+          title: "Ошибка",
+          description: "Название должно содержать не менее 2 символов",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (trimmedName.length > 50) {
+        toast({
+          title: "Ошибка",
+          description: "Название не должно превышать 50 символов",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     createChatMutation.mutate({
       name: data.name || '',
       type: data.type,
       participantIds: data.participantIds,
-      avatarUrl: data.avatarUrl
+      tempAvatarId: data.tempAvatarId
     });
     setIsUserSelectionDialogOpen(false);
   };
@@ -1587,13 +1674,17 @@ export default function MessagesPage() {
                         {participant.firstName} {participant.lastName}
                       </p>
                       <p className="text-sm text-gray-500 truncate">
-                        {participant.username} • {participant.role}
+                        {selectedChat && (selectedChat.creatorId === participant.id || participant.isAdmin)
+                          ? 'Администратор группы'
+                          : `${participant.username} • ${participant.role}`
+                        }
                       </p>
                     </div>
                     {/* Отображаем метку создателя чата */}
-                    {selectedChat && selectedChat.creatorId === participant.id && (
+                    {selectedChat && (selectedChat.creatorId === participant.id || participant.isAdmin) && (
                       <Badge variant="outline" className="ml-2 bg-primary/10">
-                        Создатель
+                        <Crown className="h-3 w-3 mr-1" />
+                        Админ
                       </Badge>
                     )}
                   </div>
@@ -1643,8 +1734,10 @@ export default function MessagesPage() {
             console.log('Toggle admin:', userId);
           }}
           onLeaveChat={() => {
-            // TODO: Реализовать выход из чата
-            console.log('Leave chat:', chatToEdit.id);
+            if (chatToEdit) {
+              setChatToLeave(chatToEdit);
+              setLeaveAlertOpen(true);
+            }
           }}
         />
       )}

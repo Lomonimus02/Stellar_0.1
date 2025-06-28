@@ -148,6 +148,9 @@ export function EditChatDialog({
     isCreator ? p.id !== currentUserId : true
   ) || [];
 
+  // Подсчитываем общее количество участников
+  const totalParticipants = chat.participants?.length || 0;
+
   return (
     <>
       <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -208,7 +211,7 @@ export function EditChatDialog({
                   </h2>
                 )}
                 <p className="text-sm text-gray-600 mt-1">
-                  {(chatParticipants.length + 1)} участников
+                  {totalParticipants} {totalParticipants === 1 ? 'участник' : totalParticipants < 5 ? 'участника' : 'участников'}
                 </p>
               </div>
             </div>
@@ -248,7 +251,7 @@ export function EditChatDialog({
                           <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                         </p>
                         <p className="text-sm text-gray-600">
-                          Администратор
+                          Администратор группы
                         </p>
                       </div>
                       <Badge className="bg-primary/10 text-primary border-primary/20">
@@ -275,11 +278,11 @@ export function EditChatDialog({
                           {participant.firstName} {participant.lastName}
                         </p>
                         <p className="text-xs text-gray-500">
-                          {participant.userId === chat?.creatorId ? 'Администратор' : 'Пользователь'}
+                          {participant.id === chat?.creatorId || participant.isAdmin ? 'Администратор группы' : 'Участник'}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
-                        {participant.userId === chat?.creatorId && (
+                        {(participant.id === chat?.creatorId || participant.isAdmin) && (
                           <Badge variant="secondary" className="text-xs">
                             <Crown className="h-3 w-3 mr-1" />
                             Админ

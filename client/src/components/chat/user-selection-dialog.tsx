@@ -22,29 +22,9 @@ import {
 import { ChatTypeEnum } from "@shared/schema";
 import { cn } from "@/lib/utils";
 
-// Простые переводы ролей на русский язык
-const getRoleLabel = (role: string): string => {
-  const roleLabels: Record<string, string> = {
-    'super_admin': 'Супер-администратор',
-    'school_admin': 'Администратор школы',
-    'teacher': 'Учитель',
-    'student': 'Ученик',
-    'parent': 'Родитель',
-    'principal': 'Директор',
-    'vice_principal': 'Завуч',
-    'class_teacher': 'Классный руководитель',
-  };
-  return roleLabels[role] || role;
-};
+import { getUserRoles, formatUserRoles, getRoleLabel, getAvailableRoles, filterUsersByRoles, userHasAnyRole, UserWithRolesCompat } from '@/utils/user-roles';
 
-interface User {
-  id: number;
-  firstName: string;
-  lastName: string;
-  role: string;
-  username?: string;
-  avatarUrl?: string;
-}
+interface User extends UserWithRolesCompat {}
 
 interface UserSelectionDialogProps {
   isOpen: boolean;
@@ -77,6 +57,7 @@ export function UserSelectionDialog({
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [groupChatName, setGroupChatName] = useState('');
   const [groupAvatarUrl, setGroupAvatarUrl] = useState<string | null>(null);
+  const [tempAvatarId, setTempAvatarId] = useState<string | null>(null);
   
   // Проверяем, что users является массивом
   if (!Array.isArray(users)) {
@@ -121,18 +102,18 @@ export function UserSelectionDialog({
   const filteredUsers = users.filter(user => {
     // Исключаем текущего пользователя
     if (user.id === currentUserId) return false;
-    
+
     // Фильтр по поисковому запросу
     const fullName = `${user.firstName} ${user.lastName}`.toLowerCase();
     const query = searchQuery.toLowerCase();
-    const matchesSearch = !searchQuery || 
-                         fullName.includes(query) || 
+    const matchesSearch = !searchQuery ||
+                         fullName.includes(query) ||
                          (user.username && user.username.toLowerCase().includes(query));
-    
-    // Фильтр по выбранным ролям
-    const matchesRole = selectedRoles.length === 0 || 
-                       selectedRoles.includes(user.role);
-    
+
+    // Фильтр по выбранным ролям (поддержка множественных ролей)
+    const matchesRole = selectedRoles.length === 0 ||
+                       userHasAnyRole(user, selectedRoles);
+
     return matchesSearch && matchesRole;
   });
 
@@ -140,14 +121,17 @@ export function UserSelectionDialog({
   const handleCreateGroupChat = () => {
     if (selectedUsers.length === 0) return;
 
-    const chatName = groupChatName.trim() ||
-                    `Групповой чат (${selectedUsers.length + 1} участников)`;
+    // Проверяем, что название группы не пустое
+    const chatName = groupChatName.trim();
+    if (!chatName) {
+      return; // Не создаем чат без названия
+    }
 
     onCreateChat({
       type: ChatTypeEnum.GROUP,
       participantIds: selectedUsers.map(u => u.id),
       name: chatName,
-      avatarUrl: groupAvatarUrl
+      tempAvatarId: tempAvatarId
     });
   };
 
@@ -156,11 +140,8 @@ export function UserSelectionDialog({
     setSelectedUsers(prev => prev.filter(u => u.id !== userId));
   };
 
-  // Получение уникальных ролей для фильтра
-  const availableRoles = Array.from(new Set(users
-    .filter(user => user.id !== currentUserId)
-    .map(user => user.role)))
-    .sort();
+  // Получение уникальных ролей для фильтра (поддержка множественных ролей)
+  const availableRoles = getAvailableRoles(users, currentUserId);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -305,37 +286,49 @@ export function UserSelectionDialog({
 
         {/* Футер для группового чата */}
         {chatType === ChatTypeEnum.GROUP && (
-          <DialogFooter className="flex flex-col gap-4">
-            <div className="flex items-center gap-4">
-              <div className="flex flex-col items-center gap-2">
-                <span className="text-sm font-medium text-gray-700">Аватарка группы</span>
+          <DialogFooter className="p-6 border-t border-gray-200">
+            {/* Основная строка с аватаркой, названием и кнопками */}
+            <div className="flex items-center gap-4 w-full">
+              {/* Аватарка группы */}
+              <div className="flex-shrink-0">
                 <AvatarUpload
                   value={groupAvatarUrl}
-                  onChange={setGroupAvatarUrl}
+                  onChange={(url, tempId) => {
+                    setGroupAvatarUrl(url);
+                    setTempAvatarId(tempId || null);
+                  }}
                   fallback="👥"
-                  size="md"
+                  size="lg"
                 />
               </div>
-              <div className="flex-1">
+
+              {/* Поле названия группы */}
+              <div className="flex-1 space-y-1">
                 <Input
-                  placeholder="Название группового чата (необязательно)"
+                  placeholder="Название группового чата *"
                   value={groupChatName}
                   onChange={(e) => setGroupChatName(e.target.value)}
+                  className={`${!groupChatName.trim() && groupChatName !== '' ? 'border-red-300 focus:border-red-500' : ''}`}
                 />
+                {!groupChatName.trim() && groupChatName !== '' && (
+                  <p className="text-xs text-red-600">Название группы обязательно</p>
+                )}
               </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={onClose}>
-                Отмена
-              </Button>
-              <Button
-                onClick={handleCreateGroupChat}
-                disabled={selectedUsers.length === 0 || isLoading}
-                className="flex items-center gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                Создать чат ({selectedUsers.length} участников)
-              </Button>
+
+              {/* Кнопки действий */}
+              <div className="flex gap-2 flex-shrink-0">
+                <Button variant="outline" onClick={onClose}>
+                  Отмена
+                </Button>
+                <Button
+                  onClick={handleCreateGroupChat}
+                  disabled={selectedUsers.length === 0 || !groupChatName.trim() || isLoading}
+                  className="flex items-center gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  Создать чат ({selectedUsers.length} участников)
+                </Button>
+              </div>
             </div>
           </DialogFooter>
         )}

@@ -191,15 +191,60 @@ export function decrypt(encryptedText: string): string {
  * @param destinationFilePath Путь для сохранения зашифрованного файла
  */
 export async function encryptFile(sourceFilePath: string, destinationFilePath: string): Promise<void> {
+  console.log('=== encryptFile started ===');
+  console.log('Source file:', sourceFilePath);
+  console.log('Destination file:', destinationFilePath);
+
   try {
+    // Проверяем, инициализированы ли ключи шифрования
+    if (!encryptionKey || !encryptionIv) {
+      console.error('Encryption keys not initialized');
+      throw new Error('Encryption keys not initialized');
+    }
+
+    console.log('Reading source file...');
     const fileData = await fs.readFile(sourceFilePath);
+    console.log('File data read, size:', fileData.length, 'bytes');
+
+    if (fileData.length === 0) {
+      console.error('Source file is empty');
+      throw new Error('Source file is empty');
+    }
+
+    console.log('Creating cipher...');
     const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, encryptionKey, encryptionIv);
+
+    console.log('Encrypting data...');
     const encryptedData = Buffer.concat([cipher.update(fileData), cipher.final()]);
-    
+    console.log('Data encrypted, size:', encryptedData.length, 'bytes');
+
+    console.log('Writing encrypted file...');
     await fs.writeFile(destinationFilePath, encryptedData);
+    console.log('Encrypted file written successfully');
+
+    // Проверяем, что файл был создан
+    try {
+      const stats = await fs.stat(destinationFilePath);
+      console.log('Encrypted file stats:', { size: stats.size, created: stats.birthtime });
+    } catch (statError) {
+      console.error('Failed to stat encrypted file:', statError);
+      throw new Error('Encrypted file was not created properly');
+    }
+
   } catch (error: any) {
-    console.error(`File encryption error: ${error.message || 'Unknown error'}`);
-    throw new Error('Failed to encrypt file');
+    console.error('=== File encryption error ===');
+    console.error('Error details:', error);
+    console.error('Error stack:', error.stack);
+
+    // Пытаемся удалить частично созданный файл
+    try {
+      await fs.unlink(destinationFilePath);
+      console.log('Cleaned up partially created encrypted file');
+    } catch (cleanupError) {
+      console.error('Failed to cleanup encrypted file:', cleanupError);
+    }
+
+    throw new Error(`Failed to encrypt file: ${error.message}`);
   }
 }
 

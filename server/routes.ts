@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { dbStorage } from "./db-storage";
 import { db } from "./db";
 import { upload, getFileType, getFileUrl, moveUploadedFile, prepareFileForDownload } from './utils/file-upload';
+import { saveTempAvatar, getTempAvatar, promoteTempAvatar, deleteTempAvatar, initTempAvatarManager } from './utils/temp-avatar-manager';
 import { Document, Packer, Paragraph, Tab, Table, TableCell, TableRow, TextRun, WidthType, BorderStyle, HeadingLevel, AlignmentType } from "docx";
 import { format } from 'date-fns';
 import * as fs from 'fs/promises';
@@ -5972,6 +5973,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const participantDetails = await Promise.all(
           participants.map(async (p) => {
             const user = await dataStorage.getUser(p.userId);
+            if (!user) {
+              console.warn(`User with ID ${p.userId} not found when getting chat participants`);
+              return {
+                id: p.userId,
+                firstName: 'Неизвестный',
+                lastName: 'Пользователь',
+                isAdmin: p.isAdmin,
+                lastReadMessageId: p.lastReadMessageId
+              };
+            }
             return {
               id: p.userId,
               firstName: user.firstName,
@@ -6016,6 +6027,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Missing required fields" });
       }
 
+      // Дополнительная валидация для групповых чатов
+      if (type === ChatTypeEnum.GROUP) {
+        const trimmedName = name.trim();
+        if (!trimmedName) {
+          return res.status(400).json({ message: "Group chat name is required and cannot be empty" });
+        }
+        if (trimmedName.length < 2) {
+          return res.status(400).json({ message: "Group chat name must be at least 2 characters long" });
+        }
+        if (trimmedName.length > 50) {
+          return res.status(400).json({ message: "Group chat name cannot exceed 50 characters" });
+        }
+      }
+
       // Используем schoolId из тела запроса или из профиля пользователя
       const chatSchoolId = schoolId || req.user.schoolId;
       if (!chatSchoolId) {
@@ -6052,8 +6077,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         type,
         creatorId: req.user!.id,
         schoolId: chatSchoolId,
-        avatarUrl: req.body.avatarUrl || null
+        avatarUrl: null // Аватарка будет установлена отдельно
       });
+
+      // Если есть временная аватарка, переносим её в постоянное хранилище
+      if (req.body.tempAvatarId) {
+        try {
+          console.log('Processing temp avatar:', req.body.tempAvatarId);
+          const avatarData = await promoteTempAvatar(req.body.tempAvatarId);
+
+          if (avatarData) {
+            // Сохраняем аватарку в базе данных
+            const chatAvatarData = {
+              chatId: newChat.id,
+              fileName: avatarData.fileName,
+              mimeType: avatarData.mimeType,
+              fileSize: avatarData.fileSize,
+              imageData: avatarData.imageData
+            };
+
+            await dataStorage.createChatAvatar(chatAvatarData);
+            await dataStorage.updateChat(newChat.id, { hasAvatar: true });
+
+            console.log('Chat avatar saved successfully for chat:', newChat.id);
+          } else {
+            console.warn('Temp avatar not found or expired:', req.body.tempAvatarId);
+          }
+        } catch (avatarError) {
+          console.error('Error saving chat avatar:', avatarError);
+          // Не прерываем создание чата из-за ошибки с аватаркой
+        }
+      }
 
       // Добавляем создателя как администратора
       await dataStorage.addChatParticipant({
@@ -6167,12 +6221,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const participantDetails = await Promise.all(
         participants.map(async (p) => {
           const user = await dataStorage.getUser(p.userId);
+          if (!user) {
+            console.warn(`User with ID ${p.userId} not found when getting chat participants`);
+            return {
+              id: p.userId,
+              firstName: 'Неизвестный',
+              lastName: 'Пользователь',
+              username: 'unknown',
+              role: 'unknown',
+              isAdmin: p.isAdmin,
+              joinedAt: p.joinedAt
+            };
+          }
           return {
             id: user.id,
             firstName: user.firstName,
             lastName: user.lastName,
             username: user.username,
             role: user.role,
+            isAdmin: p.isAdmin,
             joinedAt: p.joinedAt
           };
         })
@@ -6509,6 +6576,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // API для загрузки временной аватарки при создании чата
+  app.post("/api/upload/chat", isAuthenticated, upload.single('file'), async (req, res) => {
+    try {
+      console.log('Upload temp chat avatar request received');
+      console.log('User:', req.user?.id);
+      console.log('File:', req.file ? {
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        path: req.file.path
+      } : 'No file');
+
+      // Проверяем, загружен ли файл
+      if (!req.file) {
+        console.log('No file uploaded');
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      // Проверяем, что это изображение
+      if (!req.file.mimetype.startsWith('image/')) {
+        console.log('Invalid file type:', req.file.mimetype);
+        // Удаляем загруженный файл
+        fsSync.unlinkSync(req.file.path);
+        return res.status(400).json({ message: "Only image files are allowed" });
+      }
+
+      // Проверяем размер файла (максимум 5MB)
+      if (req.file.size > 5 * 1024 * 1024) {
+        console.log('File too large:', req.file.size);
+        fsSync.unlinkSync(req.file.path);
+        return res.status(400).json({ message: "File size cannot exceed 5MB" });
+      }
+
+      // Сохраняем как временную аватарку
+      const tempAvatar = await saveTempAvatar(req.user!.id, req.file);
+
+      const response = {
+        success: true,
+        tempAvatarId: tempAvatar.id,
+        fileUrl: tempAvatar.dataUrl,
+        fileName: tempAvatar.fileName,
+        mimeType: tempAvatar.mimeType,
+        fileSize: tempAvatar.fileSize,
+        expiresAt: tempAvatar.expiresAt.toISOString()
+      };
+
+      console.log('Temp avatar saved:', {
+        tempId: tempAvatar.id,
+        userId: req.user!.id,
+        fileName: tempAvatar.fileName,
+        expiresAt: tempAvatar.expiresAt
+      });
+
+      res.status(200).json(response);
+    } catch (error) {
+      console.error("Error uploading temporary chat avatar:", error);
+      res.status(500).json({ message: "Failed to upload file", error: error.message });
+    }
+  });
+
   // Новый API для загрузки аватарки чата
   app.post("/api/chats/:chatId/avatar", isAuthenticated, upload.single('avatar'), async (req, res) => {
     try {
@@ -6630,35 +6757,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Отправка сообщения в чат
   // Загрузка файлов для чата
-  app.post("/api/chats/:chatId/upload", isAuthenticated, upload.single('file'), async (req, res) => {
+  app.post("/api/chats/:chatId/upload", isAuthenticated, (req, res, next) => {
+    // Обработка ошибок multer
+    upload.single('file')(req, res, (err) => {
+      if (err) {
+        console.error('Multer error:', err);
+
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(413).json({
+            message: "File too large",
+            maxSize: "10MB"
+          });
+        }
+
+        if (err.message === 'Неподдерживаемый тип файла') {
+          return res.status(415).json({
+            message: "Unsupported file type"
+          });
+        }
+
+        return res.status(400).json({
+          message: "File upload error",
+          error: err.message
+        });
+      }
+
+      next();
+    });
+  }, async (req, res) => {
+    console.log('=== Chat file upload request started ===');
+    console.log('User ID:', req.user?.id);
+    console.log('Chat ID:', req.params.chatId);
+    console.log('File info:', req.file ? {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      path: req.file.path
+    } : 'No file');
+
     try {
       const chatId = parseInt(req.params.chatId);
-      
+
       // Проверяем, загружен ли файл
       if (!req.file) {
+        console.log('ERROR: No file uploaded');
         return res.status(400).json({ message: "No file uploaded" });
       }
-      
+
+      // Проверяем размер файла (максимум 10MB)
+      const maxFileSize = 10 * 1024 * 1024; // 10MB
+      if (req.file.size > maxFileSize) {
+        console.log('ERROR: File too large:', req.file.size, 'bytes');
+        // Удаляем загруженный файл
+        try {
+          await fs.unlink(req.file.path);
+        } catch (unlinkError) {
+          console.error('Failed to delete oversized file:', unlinkError);
+        }
+        return res.status(413).json({
+          message: "File too large",
+          maxSize: maxFileSize,
+          actualSize: req.file.size
+        });
+      }
+
+      // Проверяем тип файла
+      const allowedTypes = [
+        'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+        'application/pdf', 'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain', 'video/mp4', 'audio/mpeg'
+      ];
+
+      if (!allowedTypes.includes(req.file.mimetype)) {
+        console.log('ERROR: Unsupported file type:', req.file.mimetype);
+        // Удаляем загруженный файл
+        try {
+          await fs.unlink(req.file.path);
+        } catch (unlinkError) {
+          console.error('Failed to delete unsupported file:', unlinkError);
+        }
+        return res.status(415).json({
+          message: "Unsupported file type",
+          type: req.file.mimetype,
+          allowedTypes: allowedTypes
+        });
+      }
+
+      console.log('Checking chat participation...');
       // Проверяем, является ли пользователь участником чата
       const participants = await dataStorage.getChatParticipants(chatId);
+      console.log('Chat participants:', participants.map(p => ({ userId: p.userId, role: p.role })));
+
       const isParticipant = participants.some(p => p.userId === req.user.id);
-      
+      console.log('Is user participant:', isParticipant);
+
       if (!isParticipant) {
+        console.log('ERROR: User is not a participant of this chat');
         return res.status(403).json({ message: "You are not a participant of this chat" });
       }
-      
+
+      console.log('Moving uploaded file with encryption...');
+      console.log('Temp file path:', req.file.path);
+
       // Перемещаем файл из временной директории с шифрованием
       const tempFilePath = req.file.path;
       const { filename, isEncrypted } = await moveUploadedFile(tempFilePath, true); // добавляем шифрование
-      
+
+      console.log('File moved successfully:', { filename, isEncrypted });
+
       // Определяем тип файла
       const attachmentType = getFileType(req.file.mimetype);
-      
+      console.log('File type determined:', attachmentType);
+
       // Создаем URL-маршрут для получения файла через специальный endpoint
       const attachmentUrl = `/api/chats/files/${filename}`;
-      
-      // Возвращаем информацию о загруженном файле
-      res.status(201).json({
+      console.log('Attachment URL:', attachmentUrl);
+
+      const responseData = {
         success: true,
         file: {
           filename: filename,
@@ -6669,11 +6885,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: attachmentType,
           isEncrypted: isEncrypted
         }
-      });
-      
+      };
+
+      console.log('Sending response:', responseData);
+
+      // Возвращаем информацию о загруженном файле
+      res.status(201).json(responseData);
+
+      console.log('=== Chat file upload request completed successfully ===');
+
     } catch (error) {
-      console.error("Error uploading file for chat:", error);
-      res.status(500).json({ message: "Failed to upload file", error: error.message });
+      console.error("=== ERROR in chat file upload ===");
+      console.error("Error details:", error);
+      console.error("Error stack:", error.stack);
+
+      // Проверяем, не отправлен ли уже ответ
+      if (!res.headersSent) {
+        res.status(500).json({
+          message: "Failed to upload file",
+          error: error.message,
+          details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+      }
+
+      console.log('=== Chat file upload request completed with error ===');
     }
   });
   
@@ -6912,17 +7147,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         users = users.filter(user => user.role === roleFilter);
       }
       
-      // Возвращаем только необходимые поля
-      const usersFormatted = users.map(user => ({
-        id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        username: user.username,
-        role: user.role,
-        activeRole: user.activeRole
-      }));
-      
-      res.json(usersFormatted);
+      // Добавляем роли пользователей из таблицы user_roles
+      const usersWithRoles = await Promise.all(
+        users.map(async (user) => {
+          const userRoles = await dataStorage.getUserRoles(user.id);
+          return {
+            id: user.id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            username: user.username,
+            role: user.role, // legacy поле для обратной совместимости
+            activeRole: user.activeRole,
+            roles: userRoles // новое поле с множественными ролями
+          };
+        })
+      );
+
+      res.json(usersWithRoles);
     } catch (error) {
       console.error("Error getting users for chat:", error);
       res.status(500).json({ message: "Failed to get users for chat" });

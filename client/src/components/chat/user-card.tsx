@@ -2,39 +2,22 @@ import React from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-// Простые переводы ролей на русский язык
-const getRoleLabel = (role: string): string => {
-  const roleLabels: Record<string, string> = {
-    'super_admin': 'Супер-администратор',
-    'school_admin': 'Администратор школы',
-    'teacher': 'Учитель',
-    'student': 'Ученик',
-    'parent': 'Родитель',
-    'principal': 'Директор',
-    'vice_principal': 'Завуч',
-    'class_teacher': 'Классный руководитель',
-  };
-  return roleLabels[role] || role;
-};
+import { formatUserRoles, UserWithRolesCompat } from "@/utils/user-roles";
 
 interface UserCardProps {
-  user: {
-    id: number;
-    firstName: string;
-    lastName: string;
-    role: string;
-    username?: string;
-    avatarUrl?: string;
-  };
+  user: UserWithRolesCompat;
   isSelected?: boolean;
   onClick?: () => void;
   showCheckmark?: boolean;
+  context?: {
+    isGroupChatCreator?: boolean;
+    isGroupChatAdmin?: boolean;
+  };
 }
 
-export function UserCard({ user, isSelected, onClick, showCheckmark = false }: UserCardProps) {
+export function UserCard({ user, isSelected, onClick, showCheckmark = false, context }: UserCardProps) {
   const initials = `${user.firstName.charAt(0)}${user.lastName.charAt(0)}`;
-  const roleName = getRoleLabel(user.role);
+  const rolesText = formatUserRoles(user, 3, ', ', context);
   
   return (
     <div
@@ -64,8 +47,8 @@ export function UserCard({ user, isSelected, onClick, showCheckmark = false }: U
         <p className="font-medium text-gray-800 truncate">
           {user.firstName} {user.lastName}
         </p>
-        <p className="text-xs text-gray-500 truncate">
-          {roleName}
+        <p className="text-xs text-gray-500 truncate" title={rolesText}>
+          {rolesText}
         </p>
       </div>
       {showCheckmark && isSelected && (

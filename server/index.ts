@@ -11,6 +11,7 @@ import * as tls from "tls";
 import path from "path";
 import { initializeEncryption } from "./utils/encryption";
 import { checkSSLCertificates, loadSSLCertificates } from "./ssl-config";
+import { initTempAvatarManager } from "./utils/temp-avatar-manager";
 
 // Расширяем интерфейс Socket для поддержки TLS
 declare global {
@@ -250,6 +251,15 @@ function setupGracefulShutdown(servers: Server[]) {
       console.error('Failed to initialize encryption system!');
     } else {
       console.log('Encryption system initialized successfully');
+    }
+
+    // Инициализируем менеджер временных аватарок
+    console.log('Initializing temp avatar manager...');
+    try {
+      await initTempAvatarManager();
+      console.log('Temp avatar manager initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize temp avatar manager:', error);
     }
 
     // Проверяем доступность SSL-сертификатов
